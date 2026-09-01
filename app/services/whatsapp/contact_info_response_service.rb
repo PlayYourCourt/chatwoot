@@ -107,9 +107,11 @@ class Whatsapp::ContactInfoResponseService
   end
 
   def sync_contact_info_response(phone_identity)
-    contact.with_lock do
-      contact.reload
-      identity_conflict?(phone_identity) ? 'identity_conflict' : sync_phone_identity(phone_identity)
+    contact.account.with_lock do
+      contact.with_lock do
+        contact.reload
+        identity_conflict?(phone_identity) ? 'identity_conflict' : sync_phone_identity(phone_identity)
+      end
     end
   end
 

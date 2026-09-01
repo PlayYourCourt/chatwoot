@@ -47,9 +47,10 @@ json.uuid conversation.uuid
 json.additional_attributes conversation.additional_attributes
 json.agent_last_seen_at conversation.agent_last_seen_at.to_i
 json.assignee_last_seen_at conversation.assignee_last_seen_at.to_i
-json.can_reply conversation.can_reply?
+can_reply = conversation.can_reply?
+json.can_reply can_reply
 contact_info_request = local_assigns[:contact_info_request] ||
-                       Whatsapp::ContactInfoRequestEligibilityService.new(conversation: conversation).availability
+                       Whatsapp::ContactInfoRequestEligibilityService.new(conversation: conversation, can_reply: can_reply).availability
 json.contact_info_request do
   json.available contact_info_request[:available]
   json.reason contact_info_request[:reason]

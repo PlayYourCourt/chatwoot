@@ -133,4 +133,13 @@ RSpec.describe Whatsapp::ContactInfoResponseService do
     expect(contact.reload.phone_number).to be_nil
     expect(contact_inbox.inbox.contact_inboxes.find_by(source_id: '971545296927')).to be_nil
   end
+
+  it 'locks the account while assigning the shared phone identity' do
+    account = contact.account
+    expect(account).to receive(:with_lock).and_call_original
+
+    perform
+
+    expect(contact.reload.phone_number).to eq('+971545296927')
+  end
 end

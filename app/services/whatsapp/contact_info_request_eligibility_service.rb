@@ -1,5 +1,5 @@
 class Whatsapp::ContactInfoRequestEligibilityService
-  pattr_initialize [:conversation!, :message, { delivery_mode: :any, template_params: nil, pending_request: nil }]
+  pattr_initialize [:conversation!, :message, { delivery_mode: :any, template_params: nil, pending_request: nil, can_reply: nil }]
 
   class << self
     def availability_by_conversation(conversations)
@@ -65,7 +65,7 @@ class Whatsapp::ContactInfoRequestEligibilityService
   end
 
   def delivery_mode_reason
-    return :outside_messaging_window if delivery_mode == :interactive && !conversation.can_reply?
+    return :outside_messaging_window if delivery_mode == :interactive && !can_reply?
     return :template_not_configured if delivery_mode == :template && !request_contact_info_template?(template_params)
     return :template_not_configured if delivery_mode == :any && available_delivery_mode.blank?
   end
@@ -73,11 +73,17 @@ class Whatsapp::ContactInfoRequestEligibilityService
   def available_delivery_mode
     return @available_delivery_mode if defined?(@available_delivery_mode)
 
-    @available_delivery_mode = if conversation.can_reply?
+    @available_delivery_mode = if can_reply?
                                  'interactive'
                                elsif request_contact_info_templates.any?
                                  'template'
                                end
+  end
+
+  def can_reply?
+    return can_reply unless can_reply.nil?
+
+    conversation.can_reply?
   end
 
   def whatsapp_cloud_channel?

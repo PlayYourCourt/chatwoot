@@ -53,4 +53,12 @@ RSpec.describe Whatsapp::ContactInfoRequestEligibilityService do
 
     expect(availability).to include(available: true, reason: nil, delivery_mode: 'interactive')
   end
+
+  it 'reuses a supplied reply-window result' do
+    allow(conversation).to receive(:can_reply?).and_raise('should use the provided can_reply value')
+
+    result = described_class.new(conversation: conversation, can_reply: true).availability
+
+    expect(result).to include(available: true, reason: nil, delivery_mode: 'interactive')
+  end
 end
