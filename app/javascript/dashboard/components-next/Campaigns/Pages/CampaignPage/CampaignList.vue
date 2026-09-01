@@ -38,9 +38,7 @@ const handleAnalytics = campaign => emit('analytics', campaign);
       :is-live-chat-type="isLiveChatType"
       :show-analytics="
         isEnterprise &&
-        (campaign.inbox?.channel_type === INBOX_TYPES.WHATSAPP ||
-          (campaign.inbox?.channel_type === INBOX_TYPES.TWILIO &&
-            campaign.inbox?.medium === 'whatsapp')) &&
+        campaign.inbox?.channel_type === INBOX_TYPES.WHATSAPP &&
         ANALYTICS_CAMPAIGN_STATUSES.includes(campaign.campaign_status)
       "
       @edit="handleEdit(campaign)"

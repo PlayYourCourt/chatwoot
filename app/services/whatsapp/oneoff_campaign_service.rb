@@ -25,9 +25,7 @@ class Whatsapp::OneoffCampaignService
   end
 
   def validate_provider!
-    return if whatsapp_cloud_channel? || twilio_whatsapp_channel?
-
-    raise 'WhatsApp Cloud provider required'
+    raise 'WhatsApp Cloud provider required' unless whatsapp_cloud_channel?
   end
 
   def validate_feature_flag!
@@ -99,8 +97,6 @@ class Whatsapp::OneoffCampaignService
   end
 
   def submit_template(to, template_params)
-    return submit_twilio_template(to, template_params) if twilio_whatsapp_channel?
-
     processor = Whatsapp::TemplateProcessorService.new(
       channel: channel,
       template_params: template_params
@@ -118,17 +114,6 @@ class Whatsapp::OneoffCampaignService
                           }, nil)
   end
 
-  def submit_twilio_template(to, template_params)
-    content_sid, content_variables = Twilio::TemplateProcessorService.new(channel: channel, template_params: template_params).call
-    raise 'Template could not be resolved' if content_sid.blank?
-
-    send_params = { to: to, content_sid: content_sid }.merge(channel.send(:send_message_from))
-    send_params[:content_variables] = content_variables.to_json if content_variables.present?
-    send_params[:status_callback] = channel.send(:twilio_delivery_status_index_url)
-
-    channel.client.messages.create(**send_params)&.sid
-  end
-
   def authentication_template_blocked?(recipient, params)
     error = Whatsapp::AuthenticationTemplateGuard.new(channel: channel, recipient: recipient, template_params: params).error
     return false unless error
@@ -138,7 +123,7 @@ class Whatsapp::OneoffCampaignService
   end
 
   def campaign_destination(contact)
-    return [phone_recipient(contact.phone_number), nil] if contact.phone_number.present?
+    return [contact.phone_number, nil] if contact.phone_number.present?
 
     bsuid_recipients = bsuid_recipients_for(contact)
     return [bsuid_recipients.first, nil] if bsuid_recipients.one?
@@ -153,18 +138,8 @@ class Whatsapp::OneoffCampaignService
     end.uniq
   end
 
-  def phone_recipient(phone_number)
-    return phone_number unless twilio_whatsapp_channel?
-
-    "whatsapp:#{phone_number.to_s.delete_prefix('whatsapp:')}"
-  end
-
   def whatsapp_cloud_channel?
     channel.is_a?(Channel::Whatsapp) && channel.provider == 'whatsapp_cloud'
-  end
-
-  def twilio_whatsapp_channel?
-    channel.is_a?(Channel::TwilioSms) && channel.whatsapp?
   end
 end
 

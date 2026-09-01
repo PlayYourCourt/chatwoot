@@ -83,8 +83,7 @@ module Enterprise::Whatsapp::OneoffCampaignService
     if source_id.present?
       recipient.mark_sent!(source_id)
     else
-      provider_error = channel.last_provider_error if channel.respond_to?(:last_provider_error)
-      recipient.mark_failed!(provider_error || { message: 'WhatsApp provider did not return a message id' })
+      recipient.mark_failed!(channel.last_provider_error || { message: 'WhatsApp provider did not return a message id' })
     end
   end
 end
