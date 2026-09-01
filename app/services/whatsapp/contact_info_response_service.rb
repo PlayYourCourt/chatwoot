@@ -38,9 +38,8 @@ class Whatsapp::ContactInfoResponseService
   end
 
   def matching_bsuid?
-    regular_bsuid = message_payload[:from_user_id].to_s
-    return false if regular_bsuid.blank?
-    return false unless matching_contact_inboxes.exists?(source_id: regular_bsuid)
+    return false if sender_ids.blank?
+    return false unless matching_contact_inboxes.exists?
 
     sender_ids.include?(contact_inbox.source_id)
   end

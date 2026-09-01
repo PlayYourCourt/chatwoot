@@ -69,6 +69,19 @@ RSpec.describe Whatsapp::ContactInfoResponseService do
     expect(contact.reload.phone_number).to eq('+971500000000')
   end
 
+  it 'accepts a parent-only BSUID response' do
+    message_payload.delete(:from_user_id)
+    message_payload[:from_parent_user_id] = bsuid
+
+    expect(perform).to eq('shared')
+
+    expect(request_message.reload.content_attributes['whatsapp_contact_info']).to include(
+      'state' => 'shared',
+      'response_source_id' => 'wamid.contact-info-response'
+    )
+    expect(contact.reload.phone_number).to eq('+971545296927')
+  end
+
   it 'does not use a newer pending request from another BSUID contact inbox on the merged contact' do
     other_contact_inbox = create(:contact_inbox, inbox: inbox, contact: contact, source_id: 'AE.3109889333218546')
     other_conversation = create(
