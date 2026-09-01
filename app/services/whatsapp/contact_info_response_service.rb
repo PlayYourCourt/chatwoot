@@ -13,8 +13,9 @@ class Whatsapp::ContactInfoResponseService
     request_message.with_lock do
       return unless pending_request?(request_message)
 
-      state = identity_conflict?(phone_identity) ? 'identity_conflict' : sync_phone_identity(phone_identity)
+      state = sync_contact_info_response(phone_identity)
       update_request_state(request_message, state)
+      state
     end
   end
 
@@ -103,6 +104,13 @@ class Whatsapp::ContactInfoResponseService
     return true if inbox.contact_inboxes.where(source_id: phone_identity[:source_id]).where.not(contact_id: contact.id).exists?
 
     contact.account.contacts.where(phone_number: phone_number).where.not(id: contact.id).exists?
+  end
+
+  def sync_contact_info_response(phone_identity)
+    contact.with_lock do
+      contact.reload
+      identity_conflict?(phone_identity) ? 'identity_conflict' : sync_phone_identity(phone_identity)
+    end
   end
 
   def sync_phone_identity(phone_identity)

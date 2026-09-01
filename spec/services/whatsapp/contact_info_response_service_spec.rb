@@ -47,7 +47,7 @@ RSpec.describe Whatsapp::ContactInfoResponseService do
   it 'updates a pending request from a resolved conversation on the same BSUID contact inbox' do
     expect(response_conversation).not_to eq(request_conversation)
 
-    perform
+    expect(perform).to eq('shared')
 
     expect(request_message.reload.content_attributes['whatsapp_contact_info']).to include(
       'state' => 'shared',
@@ -55,6 +55,18 @@ RSpec.describe Whatsapp::ContactInfoResponseService do
     )
     expect(contact.reload.phone_number).to eq('+971545296927')
     expect(contact_inbox.inbox.contact_inboxes.find_by!(source_id: '971545296927').contact).to eq(contact)
+  end
+
+  it 'marks a conflict when the contact was already updated with a different phone' do
+    contact.update!(phone_number: '+971500000000')
+
+    expect(perform).to eq('identity_conflict')
+
+    expect(request_message.reload.content_attributes['whatsapp_contact_info']).to include(
+      'state' => 'identity_conflict',
+      'response_source_id' => 'wamid.contact-info-response'
+    )
+    expect(contact.reload.phone_number).to eq('+971500000000')
   end
 
   it 'does not use a newer pending request from another BSUID contact inbox on the merged contact' do

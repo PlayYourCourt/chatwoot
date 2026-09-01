@@ -21,6 +21,29 @@ import {
 
 const TERMINAL_CONTACT_INFO_REQUEST_STATES = ['shared', 'identity_conflict'];
 
+const contactInfoSourceId = message =>
+  message.conversation?.contact_inbox?.source_id;
+
+const hasContactInfoSource = (conversation, sourceId) => {
+  return (conversation.messages || []).some(message => {
+    return contactInfoSourceId(message) === sourceId;
+  });
+};
+
+const contactInfoRefreshConversationIds = (state, message) => {
+  const conversationIds = new Set([message.conversation_id].filter(Boolean));
+  const sourceId = contactInfoSourceId(message);
+  if (!sourceId) return [...conversationIds];
+
+  (state.allConversations || []).forEach(conversation => {
+    if (hasContactInfoSource(conversation, sourceId)) {
+      conversationIds.add(conversation.id);
+    }
+  });
+
+  return [...conversationIds];
+};
+
 export const hasMessageFailedWithExternalError = pendingMessage => {
   // This helper is used to check if the message has failed with an external error.
   // We have two cases
@@ -353,7 +376,7 @@ const actions = {
     );
   },
 
-  updateMessage({ commit, dispatch, rootGetters }, message) {
+  updateMessage({ commit, dispatch, rootGetters, state }, message) {
     commit(types.ADD_MESSAGE, message);
 
     const contactInfoRequest =
@@ -365,7 +388,11 @@ const actions = {
           contactInfoRequest.state
         ));
     if (isTerminalContactInfoRequest) {
-      dispatch('getConversation', message.conversation_id);
+      contactInfoRefreshConversationIds(state, message).forEach(
+        conversationId => {
+          dispatch('getConversation', conversationId);
+        }
+      );
     }
 
     handleVoiceCallUpdated(
