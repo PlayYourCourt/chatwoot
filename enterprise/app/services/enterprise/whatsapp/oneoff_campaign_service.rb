@@ -60,7 +60,19 @@ module Enterprise::Whatsapp::OneoffCampaignService
   def send_whatsapp_template_message(recipient:, to:, template_params:)
     return if authentication_template_blocked?(recipient, to, template_params)
 
-    source_id = submit_template(to, template_params)
+    processor = Whatsapp::TemplateProcessorService.new(
+      channel: channel,
+      template_params: template_params
+    )
+
+    name, namespace, lang_code, processed_parameters = processor.call
+
+    if name.blank?
+      recipient.mark_skipped!('Template name could not be resolved')
+      return
+    end
+
+    source_id = channel.send_template(to, template_info(name, namespace, lang_code, processed_parameters), nil)
 
     update_recipient_from_provider_response(recipient, source_id)
   rescue StandardError => e
@@ -69,6 +81,15 @@ module Enterprise::Whatsapp::OneoffCampaignService
     recipient.mark_failed!(message: e.message)
     # continue processing remaining contacts
     nil
+  end
+
+  def template_info(name, namespace, lang_code, processed_parameters)
+    {
+      name: name,
+      namespace: namespace,
+      lang_code: lang_code,
+      parameters: processed_parameters
+    }
   end
 
   def authentication_template_blocked?(campaign_recipient, recipient, params)

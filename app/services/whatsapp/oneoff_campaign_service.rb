@@ -88,15 +88,6 @@ class Whatsapp::OneoffCampaignService
   def send_whatsapp_template_message(to:, template_params:)
     return if authentication_template_blocked?(to, template_params)
 
-    submit_template(to, template_params)
-  rescue StandardError => e
-    Rails.logger.error "Failed to send WhatsApp template message to #{to}: #{e.message}"
-    Rails.logger.error "Backtrace: #{e.backtrace.first(5).join('\n')}"
-    # continue processing remaining contacts
-    nil
-  end
-
-  def submit_template(to, template_params)
     processor = Whatsapp::TemplateProcessorService.new(
       channel: channel,
       template_params: template_params
@@ -104,7 +95,7 @@ class Whatsapp::OneoffCampaignService
 
     name, namespace, lang_code, processed_parameters = processor.call
 
-    raise 'Template name could not be resolved' if name.blank?
+    return if name.blank?
 
     channel.send_template(to, {
                             name: name,
@@ -112,6 +103,12 @@ class Whatsapp::OneoffCampaignService
                             lang_code: lang_code,
                             parameters: processed_parameters
                           }, nil)
+
+  rescue StandardError => e
+    Rails.logger.error "Failed to send WhatsApp template message to #{to}: #{e.message}"
+    Rails.logger.error "Backtrace: #{e.backtrace.first(5).join('\n')}"
+    # continue processing remaining contacts
+    nil
   end
 
   def authentication_template_blocked?(recipient, params)
