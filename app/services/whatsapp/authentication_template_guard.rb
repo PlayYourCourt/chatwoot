@@ -19,20 +19,9 @@ class Whatsapp::AuthenticationTemplateGuard
   end
 
   def template
-    templates.find do |item|
-      template_name(item) == param('name') && item['language']&.casecmp?(param('language').to_s)
+    Array(channel.message_templates).find do |item|
+      item['name'] == param('name') && item['language']&.casecmp?(param('language').to_s)
     end
-  end
-
-  def templates
-    return Array(channel.message_templates) if channel.is_a?(Channel::Whatsapp)
-    return Array(channel.content_templates&.dig('templates')) if channel.is_a?(Channel::TwilioSms)
-
-    []
-  end
-
-  def template_name(item)
-    channel.is_a?(Channel::TwilioSms) ? item['friendly_name'] : item['name']
   end
 
   def param(key)
