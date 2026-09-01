@@ -14,7 +14,7 @@ module Enterprise::Whatsapp::OneoffCampaignService
 
     destination, destination_error = campaign_destination(contact)
     if destination.blank?
-      recipient.mark_failed!(message: destination_error)
+      recipient.mark_skipped!(destination_error)
       return
     end
 
@@ -96,7 +96,7 @@ module Enterprise::Whatsapp::OneoffCampaignService
     error = Whatsapp::AuthenticationTemplateGuard.new(channel: channel, recipient: recipient, template_params: params).error
     return false unless error
 
-    campaign_recipient.mark_failed!(message: error)
+    campaign_recipient.mark_skipped!(error)
     true
   end
 

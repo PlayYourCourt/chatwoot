@@ -114,6 +114,8 @@ describe Whatsapp::OneoffCampaignService do
         expect(whatsapp_channel).not_to receive(:send_template)
 
         described_class.new(campaign: campaign).perform
+
+        expect(campaign.campaign_recipients.find_by(contact: contact_without_phone)).to be_skipped
       end
 
       it 'sends to the contact BSUID when the contact has no phone number and exactly one WhatsApp identity' do
@@ -144,6 +146,8 @@ describe Whatsapp::OneoffCampaignService do
         expect(whatsapp_channel).not_to receive(:send_template)
 
         described_class.new(campaign: campaign).perform
+
+        expect(campaign.campaign_recipients.find_by(contact: contact)).to be_skipped
       end
 
       it 'does not submit authentication templates for BSUID-only contacts' do
@@ -164,6 +168,8 @@ describe Whatsapp::OneoffCampaignService do
         expect(whatsapp_channel).not_to receive(:send_template)
 
         described_class.new(campaign: campaign).perform
+
+        expect(campaign.campaign_recipients.find_by(contact: contact)).to be_skipped
       end
 
       it 'uses template processor service to process templates' do
