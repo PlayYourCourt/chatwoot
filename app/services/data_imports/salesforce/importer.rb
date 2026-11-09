@@ -19,6 +19,14 @@ class DataImports::Salesforce::Importer < DataImports::Importer
     ContactInbox.find_or_create_by!(contact: contact, inbox: inbox) { |ci| ci.source_id = "salesforce:#{contact.id}" }
   end
 
+  # The generic importer marks every imported contact as a lead; people with a Stripe id or a won
+  # opportunity are customers (decided in sf.people).
+  def contact_attributes(contact_payload)
+    super.tap do |attrs|
+      attrs[:contact_type] = Contact.contact_types[:customer] if contact_payload['contact_type'] == 'customer'
+    end
+  end
+
   def live_source_id(contact, inbox)
     case inbox.channel_type
     when 'Channel::Email' then contact.email.presence
