@@ -1,0 +1,12 @@
+# Named Cloudflare tunnel for local dev, so Twilio/Postmark/Klaviyo webhooks reach this machine at a
+# stable URL. One-time setup (needs the Cloudflare account that owns playyourcourt.com):
+#   cloudflared tunnel create chatwoot-dev
+#   cloudflared tunnel route dns chatwoot-dev chatwoot-dev.playyourcourt.com
+# Then each dev session:
+#   cloudflared tunnel --config deploy/cloudflared.local.yml run
+tunnel: 77a1bbce-2afa-43e1-9e86-766e7d98dc1c
+credentials-file: /home/kennethj/.cloudflared/77a1bbce-2afa-43e1-9e86-766e7d98dc1c.json
+ingress:
+  - hostname: chatwoot-dev.playyourcourt.com
+    service: http://localhost:3000
+  - service: http_status:404

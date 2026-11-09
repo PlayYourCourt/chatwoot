@@ -390,6 +390,9 @@ Rails.application.routes.draw do
           resources :webhooks, only: [:index, :create, :update, :destroy]
           namespace :integrations do
             resources :apps, only: [:index, :show]
+            resource :klaviyo, only: [], controller: 'klaviyo' do
+              post :outreach
+            end
             resources :hooks, only: [:show, :create, :update, :destroy] do
               member do
                 post :process_event

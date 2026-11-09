@@ -1,7 +1,8 @@
 class DataImports::Source
   PROVIDERS = {
     'freshdesk' => 'DataImports::Freshdesk::Source',
-    'intercom' => 'DataImports::Intercom::Source'
+    'intercom' => 'DataImports::Intercom::Source',
+    'salesforce' => 'DataImports::Salesforce::Source'
   }.freeze
 
   def self.for(data_import)

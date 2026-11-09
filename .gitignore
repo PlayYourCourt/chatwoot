@@ -104,3 +104,11 @@ CLAUDE.local.md
 .pnpm-store/*
 local/
 Procfile.worktree
+
+# Deploy env files (keep the *.example templates)
+deploy/.env.*
+!deploy/.env.*.example
+
+# Salesforce export ZIPs (multi-GB, never commit)
+sales_force_exports/
+deploy/.env

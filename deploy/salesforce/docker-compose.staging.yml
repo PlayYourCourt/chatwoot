@@ -1,0 +1,39 @@
+# Throwaway Postgres that holds the raw Salesforce export (loaded by load_staging.sh) and the
+# transformed sf.people / sf.threads / sf.parts tables the importer reads. Joins the Chatwoot compose
+# network so the rails/sidekiq containers reach it as `sf-staging`.
+#   docker compose -f deploy/salesforce/docker-compose.staging.yml up -d
+name: sf_staging
+
+services:
+  sf-staging:
+    image: postgres:16
+    container_name: sf-staging
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=sf
+      - POSTGRES_USER=sf
+      - POSTGRES_PASSWORD=sf
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - synchronous_commit=off
+    ports:
+      - '127.0.0.1:5433:5432'
+    volumes:
+      - sf_staging_data:/var/lib/postgresql/data
+
+networks:
+  default:
+    name: chatwoot_default
+    external: true
+
+volumes:
+  sf_staging_data:

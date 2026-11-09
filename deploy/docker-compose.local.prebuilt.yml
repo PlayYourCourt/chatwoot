@@ -1,0 +1,32 @@
+# Override for machines that can't build the image (the Dockerfile needs ~8 GB during bundle install).
+# Runs the official chatwoot/chatwoot image for the same version as this repo and bind-mounts the
+# fork's additions on top. Usage:
+#   docker compose -f deploy/docker-compose.local.yml -f deploy/docker-compose.local.prebuilt.yml up -d
+
+x-overlay: &overlay
+  image: chatwoot/chatwoot:latest
+  # DISABLE_ENTERPRISE only skips the module injection; config/application.rb still registers
+  # enterprise/app/views unconditionally, so the official image renders enterprise mail templates
+  # that call methods which were never injected. Masking the folder matches the GHCR build, which
+  # strips enterprise/ entirely.
+  tmpfs:
+    - /app/enterprise
+  volumes:
+    - ../config/routes.rb:/app/config/routes.rb:ro
+    - ../app/dispatchers/async_dispatcher.rb:/app/app/dispatchers/async_dispatcher.rb:ro
+    - ../app/controllers/api/v1/accounts/integrations/klaviyo_controller.rb:/app/app/controllers/api/v1/accounts/integrations/klaviyo_controller.rb:ro
+    - ../app/listeners/klaviyo_listener.rb:/app/app/listeners/klaviyo_listener.rb:ro
+    - ../app/jobs/klaviyo:/app/app/jobs/klaviyo:ro
+    - ../app/services/klaviyo:/app/app/services/klaviyo:ro
+    - ../app/services/salesforce:/app/app/services/salesforce:ro
+    - ../lib/tasks/salesforce.rake:/app/lib/tasks/salesforce.rake:ro
+    - ../app/services/data_imports/source.rb:/app/app/services/data_imports/source.rb:ro
+    - ../app/services/data_imports/salesforce:/app/app/services/data_imports/salesforce:ro
+    - ../app/jobs/data_imports/salesforce:/app/app/jobs/data_imports/salesforce:ro
+    - ../app/models/data_import.rb:/app/app/models/data_import.rb:ro
+
+services:
+  rails:
+    <<: *overlay
+  sidekiq:
+    <<: *overlay

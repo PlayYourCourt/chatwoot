@@ -1,0 +1,109 @@
+# Production pipeline for the PlayYourCourt Chatwoot fork.
+#   push to `main`  -> build image from docker/Dockerfile (enterprise stripped) -> push to GHCR -> deploy to the Droplet
+#   tag v*          -> build + push only (release archive)
+#   workflow_dispatch -> same as a push to the chosen branch; tick "deploy" to roll it out
+#
+# `develop` mirrors upstream chatwoot/chatwoot and is never deployed. Release = merge develop (or a
+# feature branch) into main. Rollback = re-run this workflow from the previous good commit.
+#
+# Repository secrets needed by the deploy job:
+#   DROPLET_HOST     public IP or hostname of the Droplet
+#   DROPLET_USER     SSH user that owns the checkout (e.g. root or deploy)
+#   DROPLET_SSH_KEY  private key authorised on the Droplet (deploy-only key)
+#   DROPLET_APP_DIR  path of the repo checkout on the Droplet (e.g. /opt/chatwoot)
+
+name: Build and deploy PYC Chatwoot
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy to the Droplet after building
+        type: boolean
+        default: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/chatwoot
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      sha_tag: ${{ steps.vars.outputs.sha_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Strip enterprise code
+        run: |
+          rm -rf enterprise spec/enterprise
+          echo -en '\nENV CW_EDITION="ce"' >> docker/Dockerfile
+
+      - name: Image tags
+        id: vars
+        run: echo "sha_tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.deploy)
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Deploy ${{ needs.build.outputs.sha_tag }} to the Droplet
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DROPLET_APP_DIR }}"
+            git fetch --quiet origin main
+            git checkout --quiet --force "${{ github.sha }}"
+            deploy/bin/deploy.sh "${{ env.IMAGE }}:${{ needs.build.outputs.sha_tag }}"
