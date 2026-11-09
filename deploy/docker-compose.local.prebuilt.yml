@@ -1,10 +1,10 @@
 # Override for machines that can't build the image (the Dockerfile needs ~8 GB during bundle install).
-# Runs the official chatwoot/chatwoot image for the same version as this repo and bind-mounts the
+# Runs the official chatwoot/chatwoot image for the same release as this repo (bump with each upstream merge) and bind-mounts the
 # fork's additions on top. Usage:
 #   docker compose -f deploy/docker-compose.local.yml -f deploy/docker-compose.local.prebuilt.yml up -d
 
 x-overlay: &overlay
-  image: chatwoot/chatwoot:latest
+  image: chatwoot/chatwoot:v4.19.1
   # DISABLE_ENTERPRISE only skips the module injection; config/application.rb still registers
   # enterprise/app/views unconditionally, so the official image renders enterprise mail templates
   # that call methods which were never injected. Masking the folder matches the GHCR build, which

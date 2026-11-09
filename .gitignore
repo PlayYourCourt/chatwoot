@@ -104,6 +104,10 @@ CLAUDE.local.md
 .pnpm-store/*
 local/
 Procfile.worktree
+.nodeterm/project.json
+
+# Cache that `rake ruby_llm:refresh_models` writes next to the model registry
+config/llm_models.json.published.json
 
 # Deploy env files (keep the *.example templates)
 deploy/.env.*
