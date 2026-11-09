@@ -1,0 +1,6 @@
+# FRONTEND_HOST comes from .env.do (e.g. crm.playyourcourt.com). Caddy obtains and renews the
+# Let's Encrypt certificate automatically as long as the DNS A record points at this Droplet.
+{$FRONTEND_HOST} {
+	encode gzip
+	reverse_proxy rails:3000
+}

@@ -1,0 +1,56 @@
+# DigitalOcean (or any VM) stack. Postgres is DigitalOcean Managed PostgreSQL (DATABASE_URL),
+# attachments live in Spaces, Caddy terminates TLS. Run from the repo root on the Droplet:
+#   docker compose -f deploy/docker-compose.do.yml up -d
+# The same file works on AWS by pointing DATABASE_URL at RDS and STORAGE_* at S3.
+
+name: chatwoot
+
+services:
+  base: &base
+    image: ${CHATWOOT_IMAGE:-ghcr.io/playyourcourt/chatwoot:latest}
+    env_file: .env.do
+    environment:
+      - NODE_ENV=production
+      - RAILS_ENV=production
+      - INSTALLATION_ENV=docker
+    restart: unless-stopped
+
+  rails:
+    <<: *base
+    depends_on:
+      - redis
+    entrypoint: docker/entrypoints/rails.sh
+    command: ['bundle', 'exec', 'rails', 's', '-p', '3000', '-b', '0.0.0.0']
+
+  sidekiq:
+    <<: *base
+    depends_on:
+      - redis
+    command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    command: ['sh', '-c', 'redis-server --requirepass "$$REDIS_PASSWORD"']
+    env_file: .env.do
+    volumes:
+      - redis_data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - rails
+    ports:
+      - '80:80'
+      - '443:443'
+    env_file: .env.do
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  redis_data:
+  caddy_data:
+  caddy_config:

@@ -37,7 +37,7 @@ class DataImport < ApplicationRecord
   IMPORT_STALLED_AFTER = 15.minutes
   INTERCOM_STALLED_AFTER = IMPORT_STALLED_AFTER
   LEGACY_DATA_TYPES = ['contacts'].freeze
-  INTEGRATION_DATA_TYPES = %w[freshdesk intercom].freeze
+  INTEGRATION_DATA_TYPES = %w[freshdesk intercom salesforce].freeze
   IMPORT_TYPES = %w[contacts conversations].freeze
 
   belongs_to :account
