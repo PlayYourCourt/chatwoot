@@ -3,6 +3,7 @@
 --              account:<AccountId>:<pyc number> | fd:<freshdesk ticket id>
 SET client_min_messages = warning;
 SET search_path = sf, public;
+DELETE FROM sf.cleaning_log WHERE stage = 'parts';  -- this stage rewrites its own log rows on re-run
 
 ------------------------------------------------------------------------------------------------
 -- 3a. Canonical records for Freshdesk-era duplicates
@@ -102,6 +103,7 @@ DROP TABLE IF EXISTS sf.p_drip_summary;
 CREATE UNLOGGED TABLE sf.p_drip_summary AS
 SELECT thread_key,
        min(created_at) AS created_at,
+       mode() WITHIN GROUP (ORDER BY pyc_number) AS pyc_number,
        format('Automated drip sequence: %s SMS sent between %s and %s (%s). Older automated messages were condensed on import; '
               'replies and the last message before each reply are kept.',
               count(*), to_char(min(created_at), 'YYYY-MM-DD'), to_char(max(created_at), 'YYYY-MM-DD'),
@@ -211,8 +213,8 @@ INSERT INTO sf.parts (part_id, thread_key, kind, created_at, direction, body, st
 SELECT 'sms:' || id, thread_key, 'sms', created_at, direction, body, status, pyc_number, automated,
        jsonb_strip_nulls(jsonb_build_object('sid', sid, 'drip_step', drip_step))
 FROM sf.p_sms WHERE NOT condensed;
-INSERT INTO sf.parts (part_id, thread_key, kind, created_at, direction, body, automated, raw)
-SELECT 'drip:' || thread_key, thread_key, 'sms', created_at, 'note', body, true, raw FROM sf.p_drip_summary;
+INSERT INTO sf.parts (part_id, thread_key, kind, created_at, direction, body, pyc_number, automated, raw)
+SELECT 'drip:' || thread_key, thread_key, 'sms', created_at, 'note', body, pyc_number, true, raw FROM sf.p_drip_summary;
 INSERT INTO sf.parts (part_id, thread_key, kind, created_at, direction, body, subject, author_name, from_addr, to_addr, cc_addr, pyc_address, raw)
 SELECT 'email:' || id, thread_key, 'email', created_at, direction, body, subject, author_name, from_addr, to_addr, cc_addr, pyc_address, raw FROM sf.p_email;
 INSERT INTO sf.parts (part_id, thread_key, kind, created_at, direction, body, raw)

@@ -9,6 +9,7 @@ services:
     image: postgres:16
     container_name: sf-staging
     restart: unless-stopped
+    shm_size: 512mb # parallel query workers need more than Docker's 64 MB default
     environment:
       - POSTGRES_DB=sf
       - POSTGRES_USER=sf

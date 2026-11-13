@@ -2,10 +2,12 @@
 # Salesforce-specific behaviour on top of the generic importer:
 # - contact_inboxes on live email/Twilio inboxes use the real address/number as source_id, so future
 #   inbound mail or SMS lands on the same contact_inbox (placeholders keep the synthetic id);
-# - imported conversations get their labels and open/resolved status;
+# - imported conversations get their labels, status (snoozed until a future due date), priority, owner and team;
 # - messages carry the SMS delivery status and, for emails, the subject/from/to in content_attributes.
 class DataImports::Salesforce::Importer < DataImports::Importer
   SMS_STATUSES = { 'delivered' => 'delivered', 'read' => 'read', 'sent' => 'sent' }.freeze
+  # Salesforce object => Chatwoot team name; the teams must exist before the import.
+  OBJECT_TEAMS = { 'opportunity' => 'lesson sales', 'case' => 'support' }.freeze
 
   private
 
@@ -37,8 +39,36 @@ class DataImports::Salesforce::Importer < DataImports::Importer
   def create_conversation(conversation, contact, contact_inbox, inbox, source_type)
     super.tap do |chatwoot_conversation|
       apply_labels(chatwoot_conversation, Array(conversation['labels']))
-      chatwoot_conversation.update_columns(status: Conversation.statuses['open']) if conversation['status'] == 'open'
+      chatwoot_conversation.update_columns(
+        conversation_state(conversation).merge(
+          priority: Conversation.priorities[conversation['priority']],
+          assignee_id: owner_agent_id(conversation['custom']),
+          team_id: object_team_id(conversation['sf_object'])
+        )
+      )
     end
+  end
+
+  # Unresolved threads with a due date still ahead are snoozed until it, so they come back on their own.
+  def conversation_state(conversation)
+    due_at = conversation['due_at'] && Time.zone.at(conversation['due_at'])
+    return { status: Conversation.statuses['snoozed'], snoozed_until: due_at } if conversation['status'] != 'resolved' && due_at&.future?
+
+    { status: Conversation.statuses[conversation['status']] }
+  end
+
+  # SALESFORCE_OWNER_EMAILS maps Salesforce owner / Freshdesk agent names to Chatwoot logins, per server:
+  # "Zach Howard=zach@example.com;Adam Soule=adam@example.com". The Salesforce owner wins; the Freshdesk agent is
+  # used when the owner is not listed (legacy records are owned by the migration user). Unlisted names stay unassigned.
+  def owner_agent_id(custom)
+    @owner_agent_ids ||= ENV.fetch('SALESFORCE_OWNER_EMAILS').split(';').to_h { |pair| pair.split('=', 2).map(&:strip) }
+                            .transform_values { |email| @account.users.find_by!(email: email).id }
+    @owner_agent_ids[custom['sf_owner']] || @owner_agent_ids[custom['fd_responder']]
+  end
+
+  def object_team_id(sf_object)
+    @object_team_ids ||= OBJECT_TEAMS.transform_values { |name| @account.teams.find_by!(name: name).id }
+    @object_team_ids[sf_object]
   end
 
   def apply_labels(conversation, labels)

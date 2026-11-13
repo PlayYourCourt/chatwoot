@@ -1,5 +1,6 @@
 # Creates the labels and custom attribute definitions the Salesforce import fills in. Idempotent.
 class DataImports::Salesforce::Setup
+  DRIP_STEPS = ['1st membership', '2nd membership', 'Quick', '24 hrs', '48 hrs', '7 day', '14 day', '6 week'].freeze
   LABEL_COLORS = {
     'case' => '#1f93ff', 'opportunity' => '#8b5cf6', 'lead' => '#f59e0b', 'customer' => '#10b981', 'freshdesk' => '#6b7280',
     'membership' => '#ec4899', 'lessons' => '#14b8a6', 'league' => '#0ea5e9', 'closed-won' => '#16a34a', 'closed-lost' => '#dc2626',
@@ -26,6 +27,13 @@ class DataImports::Salesforce::Setup
     'company' => %w[Company text],
     'is_pro' => ['Is Pro', 'checkbox'],
     'skill_level' => ['Skill Level', 'list', %w[Beginner Intermediate Advanced Competitor]],
+    'singles' => %w[Singles checkbox],
+    'doubles' => %w[Doubles checkbox],
+    'match_play' => ['Match Play', 'checkbox'],
+    'practice_play' => ['Practice Play', 'checkbox'],
+    'suggested_pro_url' => ['Suggested Pro', 'link'],
+    'membership_checkout_url' => ['Membership Checkout', 'link'],
+    'drip_step' => ['Drip Step', 'list', DRIP_STEPS],
     'ntrp' => %w[NTRP text],
     'age_range' => ['Age Range', 'text'],
     'fitness' => %w[Fitness text],
@@ -46,7 +54,9 @@ class DataImports::Salesforce::Setup
     'last_drip_sms_at' => ['Last Drip SMS', 'date'],
     'exclude_from_drip' => ['Exclude From Drip', 'checkbox'],
     'email_opted_out' => ['Email Opted Out', 'checkbox'],
-    'do_not_call' => ['Do Not Call', 'checkbox']
+    'do_not_call' => ['Do Not Call', 'checkbox'],
+    # set by KlaviyoListener when the contact texts STOP, cleared by START
+    'sms_opted_out_at' => ['SMS Opted Out', 'date']
   }.freeze
 
   CONVERSATION_ATTRIBUTES = {
@@ -55,16 +65,19 @@ class DataImports::Salesforce::Setup
     'case_number' => ['Case Number', 'text'],
     'case_origin' => ['Case Origin', 'text'],
     'case_type' => ['Case Type', 'text'],
-    'priority' => ['Salesforce Priority', 'text'],
+    'sf_priority' => ['Salesforce Priority', 'text'],
     'opp_stage' => ['Opportunity Stage', 'text'],
+    'sf_due_by' => ['Salesforce Due By', 'date'],
     'lead_status' => ['Lead Status', 'text'],
     'lead_source' => ['Lead Source', 'text'],
     'sf_owner' => ['Salesforce Owner', 'text'],
+    'fd_responder' => ['Freshdesk Agent', 'text'],
     'freshdesk_ticket_id' => ['Freshdesk Ticket ID', 'text'],
     'freshdesk_ticket_type' => ['Freshdesk Ticket Type', 'text'],
     'freshdesk_group' => ['Freshdesk Group', 'text'],
     'freshdesk_status' => ['Freshdesk Status', 'text'],
     'pyc_number' => ['PYC Number', 'text'],
+    'drip_step' => ['Drip Step', 'list', DRIP_STEPS],
     'source_address' => ['Source Address', 'text']
   }.freeze
 

@@ -34,7 +34,7 @@ raw = sys.stdin.buffer
 cols = next(csv.reader([raw.readline().decode("utf-8", "replace")]))
 raw.read()  # drain the rest so `head` is not killed by SIGPIPE
 defs = ", ".join(f"\"{c.lower()}\" text" for c in cols)
-print(f"DROP TABLE IF EXISTS sf.\"{sys.argv[1]}\"; CREATE TABLE sf.\"{sys.argv[1]}\" ({defs});")' "$1"
+print(f"DROP TABLE IF EXISTS sf.\"{sys.argv[1]}\" CASCADE; CREATE TABLE sf.\"{sys.argv[1]}\" ({defs});")' "$1"
 }
 
 for csv in "${!TABLES[@]}"; do

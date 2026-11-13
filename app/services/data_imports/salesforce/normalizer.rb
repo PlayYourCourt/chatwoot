@@ -29,6 +29,8 @@ class DataImports::Salesforce::Normalizer
       'created_at' => epoch(thread.created_at),
       'updated_at' => epoch(thread.last_at),
       'status' => thread.status,
+      'priority' => thread.priority,
+      'due_at' => epoch(thread.due_at),
       'bucket' => thread.bucket,
       'subject' => thread.subject,
       'labels' => Array(thread.labels),

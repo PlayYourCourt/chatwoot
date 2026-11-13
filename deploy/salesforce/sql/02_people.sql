@@ -33,6 +33,9 @@ LEFT JOIN sf.account a ON a.id = c.accountid;
 CREATE INDEX ON sf.c_clean (id);
 CREATE INDEX ON sf.c_clean (email);
 CREATE INDEX ON sf.c_clean (phone);
+CREATE INDEX ON sf.c_clean (account_id);
+CREATE INDEX ON sf.c_clean (freshdesk_id);
+CREATE INDEX ON sf.c_clean (pyc_user_id);
 
 -- junk emails -> blank
 WITH junk AS (
@@ -91,10 +94,14 @@ CREATE INDEX ON sf.l_clean (id);
 CREATE INDEX ON sf.l_clean (email);
 CREATE INDEX ON sf.l_clean (phone);
 CREATE INDEX ON sf.l_clean (converted_contact_id);
+CREATE INDEX ON sf.l_clean (pyc_user_id);
 
 -- lead -> person_key resolution
 DROP TABLE IF EXISTS sf.l_person;
-CREATE UNLOGGED TABLE sf.l_person AS
+CREATE TABLE sf.l_person AS  -- logged: stage 04 reads it
+WITH cw AS (SELECT c.id, c.email, c.phone, c.created_at, w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id)
+, by_email AS (SELECT DISTINCT ON (email) email AS k, winner_id FROM cw WHERE email IS NOT NULL ORDER BY email, created_at, id)
+, by_phone AS (SELECT DISTINCT ON (phone) phone AS k, winner_id FROM cw WHERE phone IS NOT NULL ORDER BY phone, created_at, id)
 SELECT l.id AS lead_id,
        coalesce(
          'contact:' || wc.winner_id,                                   -- converted
@@ -104,10 +111,8 @@ SELECT l.id AS lead_id,
        ) AS person_key
 FROM sf.l_clean l
 LEFT JOIN sf.c_winner wc ON wc.id = l.converted_contact_id
-LEFT JOIN LATERAL (SELECT w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id
-                   WHERE l.email IS NOT NULL AND c.email = l.email ORDER BY c.created_at LIMIT 1) we ON true
-LEFT JOIN LATERAL (SELECT w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id
-                   WHERE l.phone IS NOT NULL AND c.phone = l.phone ORDER BY c.created_at LIMIT 1) wp ON true;
+LEFT JOIN by_email we ON we.k = l.email
+LEFT JOIN by_phone wp ON wp.k = l.phone;
 CREATE INDEX ON sf.l_person (lead_id);
 CREATE INDEX ON sf.l_person (person_key);
 INSERT INTO sf.cleaning_log
@@ -117,7 +122,7 @@ SELECT 'people', 'lead_attached_to_contact', lead_id, person_key FROM sf.l_perso
 -- 2d. Freshdesk requesters from staging tickets that are not already a contact/lead.
 ------------------------------------------------------------------------------------------------
 DROP TABLE IF EXISTS sf.s_clean;
-CREATE UNLOGGED TABLE sf.s_clean AS
+CREATE TABLE sf.s_clean AS  -- logged: stage 03 reads it, and unlogged tables are emptied by a crash restart
 SELECT s.id,
        sf.nz(s.pyc_legacy_id__c)        AS legacy_id,
        sf.nz(s.requester_id__c)         AS requester_id,
@@ -138,7 +143,17 @@ CREATE INDEX ON sf.s_clean (legacy_id);
 CREATE INDEX ON sf.s_clean (requester_id);
 
 DROP TABLE IF EXISTS sf.s_person;
-CREATE UNLOGGED TABLE sf.s_person AS
+-- One first match per key, hash-joined (a per-row lookup over 690k tickets is far too slow).
+CREATE TABLE sf.s_person AS  -- logged: stage 04 reads it
+WITH cw AS (SELECT c.*, w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id)
+, by_account AS (SELECT DISTINCT ON (account_id) account_id AS k, winner_id FROM cw WHERE account_id IS NOT NULL ORDER BY account_id, created_at, id)
+, by_freshdesk AS (SELECT DISTINCT ON (freshdesk_id) freshdesk_id AS k, winner_id FROM cw WHERE freshdesk_id IS NOT NULL ORDER BY freshdesk_id, created_at, id)
+, by_pyc AS (SELECT DISTINCT ON (pyc_user_id) pyc_user_id AS k, winner_id FROM cw WHERE pyc_user_id IS NOT NULL ORDER BY pyc_user_id, created_at, id)
+, by_email AS (SELECT DISTINCT ON (email) email AS k, winner_id FROM cw WHERE email IS NOT NULL ORDER BY email, created_at, id)
+, by_phone AS (SELECT DISTINCT ON (phone) phone AS k, winner_id FROM cw WHERE phone IS NOT NULL ORDER BY phone, created_at, id)
+, lw AS (SELECT l.*, p.person_key FROM sf.l_clean l JOIN sf.l_person p ON p.lead_id = l.id)
+, lead_pyc AS (SELECT DISTINCT ON (pyc_user_id) pyc_user_id AS k, person_key FROM lw WHERE pyc_user_id IS NOT NULL ORDER BY pyc_user_id, created_at, id)
+, lead_email AS (SELECT DISTINCT ON (email) email AS k, person_key FROM lw WHERE email IS NOT NULL ORDER BY email, created_at, id)
 SELECT s.id AS staging_id,
        coalesce(
          'contact:' || wa.winner_id,                                                   -- linked account
@@ -154,19 +169,13 @@ SELECT s.id AS staging_id,
          CASE WHEN s.phone IS NOT NULL THEN 'phone:' || s.phone END
        ) AS person_key
 FROM sf.s_clean s
-LEFT JOIN LATERAL (SELECT w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id WHERE c.account_id = s.account_id LIMIT 1) wa ON true
-LEFT JOIN LATERAL (SELECT w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id
-                   WHERE s.requester_id IS NOT NULL AND c.freshdesk_id = s.requester_id ORDER BY c.created_at LIMIT 1) wr ON true
-LEFT JOIN LATERAL (SELECT w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id
-                   WHERE s.pyc_user_id IS NOT NULL AND c.pyc_user_id = s.pyc_user_id ORDER BY c.created_at LIMIT 1) wu ON true
-LEFT JOIN LATERAL (SELECT p.person_key FROM sf.l_clean l JOIN sf.l_person p ON p.lead_id = l.id
-                   WHERE s.pyc_user_id IS NOT NULL AND l.pyc_user_id = s.pyc_user_id ORDER BY l.created_at LIMIT 1) lp ON true
-LEFT JOIN LATERAL (SELECT w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id
-                   WHERE s.email IS NOT NULL AND c.email = s.email ORDER BY c.created_at LIMIT 1) we ON true
-LEFT JOIN LATERAL (SELECT w.winner_id FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id
-                   WHERE s.phone IS NOT NULL AND c.phone = s.phone ORDER BY c.created_at LIMIT 1) wp ON true
-LEFT JOIN LATERAL (SELECT p.person_key FROM sf.l_clean l JOIN sf.l_person p ON p.lead_id = l.id
-                   WHERE s.email IS NOT NULL AND l.email = s.email ORDER BY l.created_at LIMIT 1) le ON true;
+LEFT JOIN by_account wa ON wa.k = s.account_id
+LEFT JOIN by_freshdesk wr ON wr.k = s.requester_id
+LEFT JOIN by_pyc wu ON wu.k = s.pyc_user_id
+LEFT JOIN lead_pyc lp ON lp.k = s.pyc_user_id
+LEFT JOIN by_email we ON we.k = s.email
+LEFT JOIN by_phone wp ON wp.k = s.phone
+LEFT JOIN lead_email le ON le.k = s.email;
 CREATE INDEX ON sf.s_person (staging_id);
 CREATE INDEX ON sf.s_person (person_key);
 INSERT INTO sf.cleaning_log SELECT 'people', 'staging_ticket_without_identity_skipped', staging_id, NULL FROM sf.s_person WHERE person_key IS NULL;
@@ -184,22 +193,22 @@ SELECT 'lead', lead_id, person_key FROM sf.l_person
 UNION ALL
 SELECT 'staging', staging_id, person_key FROM sf.s_person WHERE person_key IS NOT NULL
 UNION ALL
-SELECT DISTINCT ON (c.freshdesk_id) 'freshdesk_requester', c.freshdesk_id, 'contact:' || w.winner_id
-FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id WHERE c.freshdesk_id IS NOT NULL ORDER BY c.freshdesk_id, c.created_at
+(SELECT DISTINCT ON (c.freshdesk_id) 'freshdesk_requester', c.freshdesk_id, 'contact:' || w.winner_id
+ FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id WHERE c.freshdesk_id IS NOT NULL ORDER BY c.freshdesk_id, c.created_at)
 UNION ALL
-SELECT DISTINCT ON (s.requester_id) 'freshdesk_requester', s.requester_id, p.person_key
-FROM sf.s_clean s JOIN sf.s_person p ON p.staging_id = s.id
-WHERE s.requester_id IS NOT NULL AND p.person_key IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM sf.c_clean c WHERE c.freshdesk_id = s.requester_id)
-ORDER BY s.requester_id, s.created_at
+(SELECT DISTINCT ON (s.requester_id) 'freshdesk_requester', s.requester_id, p.person_key
+ FROM sf.s_clean s JOIN sf.s_person p ON p.staging_id = s.id
+ WHERE s.requester_id IS NOT NULL AND p.person_key IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sf.c_clean c WHERE c.freshdesk_id = s.requester_id)
+ ORDER BY s.requester_id, s.created_at)
 UNION ALL
-SELECT DISTINCT ON (c.pyc_user_id) 'pyc_user', c.pyc_user_id, 'contact:' || w.winner_id
-FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id WHERE c.pyc_user_id IS NOT NULL ORDER BY c.pyc_user_id, c.created_at
+(SELECT DISTINCT ON (c.pyc_user_id) 'pyc_user', c.pyc_user_id, 'contact:' || w.winner_id
+ FROM sf.c_clean c JOIN sf.c_winner w ON w.id = c.id WHERE c.pyc_user_id IS NOT NULL ORDER BY c.pyc_user_id, c.created_at)
 UNION ALL
-SELECT DISTINCT ON (l.pyc_user_id) 'pyc_user', l.pyc_user_id, p.person_key
-FROM sf.l_clean l JOIN sf.l_person p ON p.lead_id = l.id
-WHERE l.pyc_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sf.c_clean c WHERE c.pyc_user_id = l.pyc_user_id)
-ORDER BY l.pyc_user_id, l.created_at;
+(SELECT DISTINCT ON (l.pyc_user_id) 'pyc_user', l.pyc_user_id, p.person_key
+ FROM sf.l_clean l JOIN sf.l_person p ON p.lead_id = l.id
+ WHERE l.pyc_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sf.c_clean c WHERE c.pyc_user_id = l.pyc_user_id)
+ ORDER BY l.pyc_user_id, l.created_at);
 CREATE INDEX ON sf.person_alias (kind, sf_id);
 CREATE INDEX ON sf.person_alias (person_key);
 
@@ -246,8 +255,6 @@ SELECT 'contact:' || cc.id,
          'lead_source', coalesce(leads.source, sf.nz(c.leadsource), sf.nz(a.accountsource)),
          'owner', own.name,
          'is_pro', (sf.nz(c.is_pro__c) = '1'),
-         'skill_level', coalesce(sf.nz(c.skill_level__c), leads.skill_level),
-         'ntrp', coalesce(sf.nz(c.playing_level_ntrp__c), sf.nz(c.skill_level_ntrp__c), leads.ntrp),
          'age_range', coalesce(sf.nz(c.age_range__c), leads.age_range),
          'fitness', coalesce(sf.nz(c.fitness__c), leads.fitness),
          'lesson_goal', coalesce(sf.nz(c.lesson_goal__c), leads.lesson_goal),
@@ -286,8 +293,6 @@ LEFT JOIN LATERAL (
                     ORDER BY l.createddate DESC))[1] AS lead_type,
          (array_agg(sf.nz(l.status) ORDER BY l.createddate DESC))[1] AS status,
          (array_agg(sf.nz(l.leadsource) ORDER BY l.createddate DESC))[1] AS source,
-         (array_agg(sf.nz(l.skill_level__c) ORDER BY l.createddate DESC))[1] AS skill_level,
-         (array_agg(sf.nz(l.playing_level_ntrp__c) ORDER BY l.createddate DESC))[1] AS ntrp,
          (array_agg(sf.nz(l.age_range__c) ORDER BY l.createddate DESC))[1] AS age_range,
          (array_agg(sf.nz(l.fitness__c) ORDER BY l.createddate DESC))[1] AS fitness,
          (array_agg(sf.nz(l.lesson_goal__c) ORDER BY l.createddate DESC))[1] AS lesson_goal,
@@ -318,8 +323,6 @@ SELECT g.person_key,
          'lead_status', sf.nz(l.status),
          'lead_source', sf.nz(l.leadsource),
          'owner', own.name,
-         'skill_level', sf.nz(l.skill_level__c),
-         'ntrp', sf.nz(l.playing_level_ntrp__c),
          'age_range', sf.nz(l.age_range__c),
          'fitness', sf.nz(l.fitness__c),
          'lesson_goal', sf.nz(l.lesson_goal__c),
