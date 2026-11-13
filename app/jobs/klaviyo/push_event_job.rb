@@ -16,7 +16,7 @@ class Klaviyo::PushEventJob < ApplicationJob
     profile = { email: contact.email, phone_number: contact.phone_number }.compact_blank
     return if profile.empty?
 
-    Klaviyo::EventsClient.new(api_key).create_event(
+    Klaviyo::Client.new(api_key).create_event(
       metric: METRIC,
       profile: profile,
       properties: {
