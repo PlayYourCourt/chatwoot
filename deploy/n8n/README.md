@@ -32,12 +32,12 @@ every 5 min: Flow workflow claims due rows ──▶ Gate (Chatwoot DB, read-onl
      PSQL="docker compose -f deploy/docker-compose.local.yml exec -T postgres psql -U postgres" deploy/n8n/setup_db.sh
 
    # production: the managed cluster's admin URL (DO console → Connection details → doadmin)
-   N8N_DB_PASSWORD=… SEQ_ENGINE_PASSWORD=… CHATWOOT_READONLY_PASSWORD=… \
+   N8N_DB_PASSWORD='…' SEQ_ENGINE_PASSWORD='…' CHATWOOT_READONLY_PASSWORD='…' \
      deploy/n8n/setup_db.sh "postgres://doadmin:…@…ondigitalocean.com:25060/defaultdb?sslmode=require"
    ```
 
-   Re-running only adds what is missing; passwords are set when a role is first created (change them in
-   the DO console or with `ALTER ROLE` afterwards).
+   Single-quote the passwords (bash expands `$word` and `!` otherwise). Re-running only adds what is missing
+   and sets the three passwords to the given values, so it also serves to rotate them.
 2. **`deploy/.env.n8n`** from `deploy/.env.n8n.example`: the `n8n` database values from step 1 and a fresh
    `N8N_ENCRYPTION_KEY` (`openssl rand -hex 32`). Back that key up: it encrypts the stored credentials.
    Production also needs `N8N_HOST=automations.playyourcourt.com` in `deploy/.env.do` (Caddy reads it)

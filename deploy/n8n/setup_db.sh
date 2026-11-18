@@ -1,23 +1,34 @@
 #!/usr/bin/env bash
 # Creates the databases and roles the n8n sequence engine needs and loads the seq schema. Idempotent.
 #
-#   N8N_DB_PASSWORD=… SEQ_ENGINE_PASSWORD=… CHATWOOT_READONLY_PASSWORD=… \
+#   N8N_DB_PASSWORD='…' SEQ_ENGINE_PASSWORD='…' CHATWOOT_READONLY_PASSWORD='…' \
 #     deploy/n8n/setup_db.sh "postgres://doadmin:…@host:25060/defaultdb?sslmode=require"
+#   (single-quote the passwords: bash expands $word and ! inside double quotes or bare words)
 #
 # Locally (Postgres runs in compose, no published port) point PSQL at the container instead:
 #   PSQL="docker compose -f deploy/docker-compose.local.yml exec -T postgres psql -U postgres" deploy/n8n/setup_db.sh
 #
 # Creates: role n8n + database n8n (n8n's own tables), role seq_engine + database seq (engine state, no DELETE
 # on logs), role chatwoot_readonly with SELECT on the Chatwoot tables the Gate reads (CHATWOOT_DB, default
-# chatwoot_production). Passwords are only set when the role is first created.
+# chatwoot_production). Passwords are set to the given values on every run.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 CHATWOOT_DB=${CHATWOOT_DB:-chatwoot_production}
-PSQL=${PSQL:-"psql ${1:?admin postgres url}"}
 : "${N8N_DB_PASSWORD:?}" "${SEQ_ENGINE_PASSWORD:?}" "${CHATWOOT_READONLY_PASSWORD:?}"
 
-run() { $PSQL -v ON_ERROR_STOP=1 -qX "$@"; }
+if [ -n "${PSQL:-}" ]; then
+  run() { $PSQL -v ON_ERROR_STOP=1 -qX "$@"; }
+else
+  # psql lets -d override the database in a URL (and drops the host with it), so build one URL per database.
+  ADMIN_URL=${1:?admin postgres url}
+  base=${ADMIN_URL%/*}; rest=${ADMIN_URL##*/}; query=${rest#*\?}; [ "$query" = "$rest" ] && query=''
+  run() {
+    local db=${rest%%\?*}
+    if [ "${1:-}" = -d ]; then db=$2; shift 2; fi
+    psql "$base/$db${query:+?$query}" -v ON_ERROR_STOP=1 -qX "$@"
+  }
+fi
 
 run <<SQL
 SELECT format('CREATE ROLE n8n LOGIN PASSWORD %L', '$N8N_DB_PASSWORD')
@@ -26,6 +37,9 @@ SELECT format('CREATE ROLE seq_engine LOGIN PASSWORD %L', '$SEQ_ENGINE_PASSWORD'
   WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'seq_engine') \gexec
 SELECT format('CREATE ROLE chatwoot_readonly LOGIN PASSWORD %L', '$CHATWOOT_READONLY_PASSWORD')
   WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chatwoot_readonly') \gexec
+ALTER ROLE n8n PASSWORD '$N8N_DB_PASSWORD';
+ALTER ROLE seq_engine PASSWORD '$SEQ_ENGINE_PASSWORD';
+ALTER ROLE chatwoot_readonly PASSWORD '$CHATWOOT_READONLY_PASSWORD';
 SELECT 'CREATE DATABASE n8n' WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'n8n') \gexec
 SELECT 'CREATE DATABASE seq' WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'seq') \gexec
 GRANT CONNECT, CREATE, TEMP ON DATABASE n8n TO n8n;
