@@ -1,0 +1,325 @@
+{
+  "name": "Seq: Send",
+  "nodes": [
+    {
+      "id": "33e56b0a-27d9-5321-8960-16bf4f88e078",
+      "name": "Steps",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "c92221f7-d1ce-5aa8-acf9-69412deb2cb5",
+      "name": "Render",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n\nconst UNITS = ['minutes', 'hours', 'days', 'weeks'];\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  const c = r.contact || {};\n  // Precedence: enrollment params (from the webhook) > Flow config vars > contact attributes > contact basics.\n  const fields = { name: c.name, first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone_number, ...(c.attrs || {}),\n                   ...((r.flow && r.flow.vars) || {}), ...(r.params || {}) };\n  let error = null;\n  const body = String(r.message || '').replace(/\\{\\{\\s*([\\w.]+)\\s*\\}\\}/g, (_, key) => {\n    const v = fields[key];\n    if (v === undefined || v === null || v === '') { error = error || 'missing_placeholder:' + key; return ''; }\n    return String(v);\n  });\n  if (!r.message) error = 'empty_message';\n  if (!UNITS.includes(r.delay_unit) && r.next_step !== 'done') error = error || 'bad_delay_unit:' + r.delay_unit;\n  const variant = r.variant || 'A';\n  const key = `${r.enrollment_id}:${r.current_step}:${variant}`;\n  const status = error ? 'skipped' : 'pending';\n  const log_sql = `INSERT INTO seq_message_logs (enrollment_id, contact_id, inbox_id, step, variant, body, idempotency_key, status, error, timezone, timezone_source, local_time, consent_snapshot, sent_by)\n    VALUES (${r.enrollment_id}, ${c.id}, ${r.flow.inbox_id}, ${q(r.current_step)}, ${q(variant)}, ${q(body)}, ${q(key)}, ${q(status)}, ${q(error)}, ${q(r.timezone)}, ${q(r.timezone_source)}, ${q(r.local_time)}, ${qj({ opted_out_at: (c.attrs || {}).sms_opted_out_at || null })}, 'engine')\n    ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`;\n  out.push({ json: { ...r, body, variant, idempotency_key: key, render_error: error, log_sql } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "566bdabe-a691-55da-85fb-71e6d12ee774",
+      "name": "Log message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.log_sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "75a7d4a9-0369-5560-90c9-dab71a3e72f3",
+      "name": "Prepare send",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\n// Pair the insert results with the rendered rows (one result item per row, {} when the key already existed).\nconst rendered = $('Render').all();\nconst out = [];\n$input.all().forEach((item, i) => {\n  const r = rendered[i].json;\n  const log_id = item.json.id || null;\n  let action = 'send';\n  if (!log_id) action = 'already_sent';\n  else if (r.render_error) action = 'fail';\n  out.push({ json: { ...r, log_id, action } });\n});\nreturn out;\n"
+      }
+    },
+    {
+      "id": "626df7ed-71ce-58e1-954b-998d6990472f",
+      "name": "Send it?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a9c51e2e-a9d8-5df0-bf19-d4377c7dff62",
+              "leftValue": "={{ $json.action }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "send"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3c4b94a3-0311-505b-99d4-ccd66cc4b9c0",
+      "name": "Chatwoot outreach",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://rails:3000/api/v1/accounts/1/integrations/klaviyo/outreach",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ phone_number: $json.phone, email: $json.contact.email || undefined, name: $json.contact.name || undefined,\n  inbox_id: $json.flow.inbox_id, content: $json.body }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Chatwoot API token",
+          "type": "httpHeaderAuth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "e6b9d1ec-5ae3-5986-8771-d5f71cd19df4",
+      "name": "Both branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 2
+      }
+    },
+    {
+      "id": "18f59c48-47db-562e-bb97-ce0763cf52b2",
+      "name": "Outcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n\n// Items arrive from both branches of \"Send it?\": HTTP results (true) and untouched rows (false).\nlet httpItems = [];\ntry { httpItems = $('Chatwoot outreach').all(); } catch (e) { httpItems = []; }\nlet sentRows = [];\ntry { sentRows = $('Send it?').all(0); } catch (e) { sentRows = []; }\nlet otherRows = [];\ntry { otherRows = $('Send it?').all(1); } catch (e) { otherRows = []; }\n\nfunction classify(res) {\n  if (!res.error) return { status: 'sent', message_id: res.message_id || null, error: null };\n  const err = res.error;\n  const text = typeof err === 'string' ? err : JSON.stringify(err);\n  const code = typeof err === 'object' && (err.httpCode || err.status || err.statusCode);\n  const m = text.match(/\\b(4\\d\\d|5\\d\\d)\\b/);\n  if (code || m) return { status: 'failed', message_id: null, error: text.slice(0, 500) };\n  return { status: 'unknown', message_id: null, error: text.slice(0, 500) };   // timeout, connection reset: outcome not known\n}\n\nconst out = [];\nconst finish = (r, status, message_id, error) => {\n  const failurePolicy = (r.flow && r.flow.on_send_failure) || 'continue';\n  let send_result, enrollment_sql;\n  const advance = r.next_step === 'done'\n    ? `UPDATE seq_enrollments SET status = 'completed', ended_at = now(), current_step = 'done', claimed_at = NULL, defer_count = 0 WHERE id = ${r.enrollment_id} AND status = 'active'`\n    : `UPDATE seq_enrollments SET current_step = ${q(r.next_step)}, next_run_at = now() + interval '${Number(r.delay_to_next) || 0} ${r.delay_unit}', claimed_at = NULL, defer_count = 0 WHERE id = ${r.enrollment_id} AND status = 'active'`;\n  const hold = `UPDATE seq_enrollments SET status = 'held', held_at = now(), claimed_at = NULL WHERE id = ${r.enrollment_id} AND status = 'active'`;\n  const exit = `UPDATE seq_enrollments SET status = 'exited', ended_at = now(), exit_reason = 'send_failed', claimed_at = NULL WHERE id = ${r.enrollment_id} AND status = 'active'`;\n  if (status === 'unknown') { send_result = 'held'; enrollment_sql = hold; }\n  else if (status === 'failed' || status === 'skipped') {\n    send_result = failurePolicy === 'hold' ? 'held' : failurePolicy === 'exit' ? 'exited' : 'advanced';\n    enrollment_sql = failurePolicy === 'hold' ? hold : failurePolicy === 'exit' ? exit : advance;\n  } else { send_result = 'advanced'; enrollment_sql = advance; }\n  const stepOutcome = status === 'sent' ? 'sent' : status === 'already_sent' ? 'skipped' : 'failed';\n  const logUpdate = r.log_id\n    ? `UPDATE seq_message_logs SET status = ${q(status === 'already_sent' ? 'skipped' : status)}, chatwoot_message_id = ${message_id || 'NULL'}, error = ${q(error)} WHERE id = ${r.log_id}`\n    : `SELECT 1`;\n  const update_sql = `WITH l AS (${logUpdate}), e AS (${enrollment_sql})\n    INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, inputs) VALUES (${r.enrollment_id}, ${q(r.current_step)}, ${q(stepOutcome)}, ${q(error || (status === 'already_sent' ? 'already_sent' : null))}, ${qj({ status, send_result, message_id, next_step: r.next_step })})`;\n  out.push({ json: { enrollment_id: r.enrollment_id, step: r.current_step, status, send_result, message_id, error, update_sql } });\n};\nsentRows.forEach((row, i) => { const res = (httpItems[i] || {}).json || { error: 'no response item' }; const c = classify(res); finish(row.json, c.status, c.message_id, c.error); });\notherRows.forEach(row => { const r = row.json; finish(r, r.action === 'already_sent' ? 'already_sent' : 'skipped', null, r.render_error); });\nreturn out;\n"
+      }
+    },
+    {
+      "id": "fdaf5bb5-aa62-5eb7-9ff9-2be53838d47a",
+      "name": "Update log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.update_sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ccd4c2a3-7c5c-5f3e-b111-4fb411f715a2",
+      "name": "Return",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $('Outcome').all().map(i => { const { update_sql, ...rest } = i.json; return { json: rest }; });"
+      }
+    },
+    {
+      "id": "ae2c4853-e397-560c-bc0e-c746b3e4a43d",
+      "name": "Note 0e1a96de",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -220
+      ],
+      "parameters": {
+        "content": "## Seq: Send\nOne item per step to send (row + step config). Writes the message log row first (unique key = enrollment:step:variant, so a rerun never sends twice), posts through Chatwoot's outreach endpoint once (no retry), then records the outcome and applies the next step / hold / exit to the enrollment itself. Returns `send_result` per row.",
+        "width": 1100,
+        "height": 150,
+        "color": 1
+      }
+    }
+  ],
+  "connections": {
+    "Steps": {
+      "main": [
+        [
+          {
+            "node": "Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render": {
+      "main": [
+        [
+          {
+            "node": "Log message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log message": {
+      "main": [
+        [
+          {
+            "node": "Prepare send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare send": {
+      "main": [
+        [
+          {
+            "node": "Send it?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send it?": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot outreach",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Both branches",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Chatwoot outreach": {
+      "main": [
+        [
+          {
+            "node": "Both branches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Both branches": {
+      "main": [
+        [
+          {
+            "node": "Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outcome": {
+      "main": [
+        [
+          {
+            "node": "Update log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update log": {
+      "main": [
+        [
+          {
+            "node": "Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  }
+}

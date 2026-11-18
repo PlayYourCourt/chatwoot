@@ -1,0 +1,316 @@
+{
+  "name": "Seq: label watcher",
+  "nodes": [
+    {
+      "id": "9fa976af-09a5-5f1b-90b8-2f2aecbe10cb",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chatwoot-events",
+        "options": {},
+        "responseMode": "onReceived"
+      },
+      "webhookId": "ab2a039f-5bae-512c-adfe-bc4244bb470d"
+    },
+    {
+      "id": "44f5cc97-64b0-5608-a293-a1e591299aed",
+      "name": "Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { token: $json.query.key || '' } }];"
+      }
+    },
+    {
+      "id": "2c49fe54-8b75-5351-8581-995c8da7944b",
+      "name": "Check key",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: check api key"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "55a979d2-d69c-58b9-8c2f-2d108206d526",
+      "name": "Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3e49dd62-4ea8-5d24-890f-3921bdcda399",
+              "leftValue": "={{ $json.authorized }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "172fc96a-8487-544f-b6b6-81e136d2ae85",
+      "name": "Label actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n\n// Chatwoot conversation_updated webhook: changed_attributes[].label_list = {previous_value, current_value}\nconst p = $('Webhook').first().json.body || {};\nif (p.event !== 'conversation_updated') return [];\nconst change = (p.changed_attributes || []).find(c => c.label_list);\nif (!change) return [];\nconst added = (change.label_list.current_value || []).filter(l => !(change.label_list.previous_value || []).includes(l));\nconst sender = (p.meta && p.meta.sender) || {};\nconst out = [];\nfor (const label of added) {\n  if (label === 'stop-sequence' && sender.id) {\n    out.push({ json: { action: 'exit', contact_id: sender.id, exit_sql: `WITH e AS (UPDATE seq_enrollments SET status = 'exited', ended_at = now(), exit_reason = 'stop_label', claimed_at = NULL\n      WHERE contact_id = ${sender.id} AND status = 'active' RETURNING id, current_step)\n      INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason) SELECT id, current_step, 'exited', 'stop_label' FROM e` } });\n  } else if (label.startsWith('enroll-')) {\n    out.push({ json: { action: 'enroll', flow: label.slice(7), phone_number: sender.phone_number, email: sender.email, name: sender.name, source: 'label' } });\n  }\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "f19d51e4-9f6e-55f2-b07c-ea43111087a6",
+      "name": "Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "035d51b0-3981-58fd-8923-986c47bafc8b",
+                    "leftValue": "={{ $json.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "enroll"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "enroll"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ac846a3a-55d6-5e51-916e-80e517e22600",
+                    "leftValue": "={{ $json.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "exit"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "exit"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6977689c-ef64-5759-9ce6-0f807c6e40f5",
+      "name": "Enroll",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1320,
+        -80
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: enroll contact"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "a885c801-83bb-5653-9ee6-0e32c9b99d3c",
+      "name": "Exit enrollments",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1320,
+        80
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.exit_sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "46c7797a-f442-58b0-a408-26e4f6abed88",
+      "name": "Note 4517cfa4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -200
+      ],
+      "parameters": {
+        "content": "## Seq: label watcher\nChatwoot webhook (`conversation_updated`, URL `\u2026/webhook/chatwoot-events?key=<api key>`). Adding `enroll-<flow>` to a conversation enrolls its contact; adding `stop-sequence` exits every active enrollment.",
+        "width": 900,
+        "height": 110,
+        "color": 1
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token": {
+      "main": [
+        [
+          {
+            "node": "Check key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check key": {
+      "main": [
+        [
+          {
+            "node": "Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Label actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label actions": {
+      "main": [
+        [
+          {
+            "node": "Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action": {
+      "main": [
+        [
+          {
+            "node": "Enroll",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Exit enrollments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  }
+}

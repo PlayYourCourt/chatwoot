@@ -1,0 +1,245 @@
+{
+  "name": "Seq API: enroll",
+  "nodes": [
+    {
+      "id": "9fa976af-09a5-5f1b-90b8-2f2aecbe10cb",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enroll",
+        "options": {},
+        "responseMode": "responseNode"
+      },
+      "webhookId": "61c28df2-eef2-54d6-afcb-1a35f1367e46"
+    },
+    {
+      "id": "44f5cc97-64b0-5608-a293-a1e591299aed",
+      "name": "Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(i => ({ json: { token: String(i.json.headers.authorization || '').replace(/^Bearer\\s+/i, '') || i.json.query.key || '' } }));"
+      }
+    },
+    {
+      "id": "2c49fe54-8b75-5351-8581-995c8da7944b",
+      "name": "Check key",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: check api key"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "55a979d2-d69c-58b9-8c2f-2d108206d526",
+      "name": "Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3e49dd62-4ea8-5d24-890f-3921bdcda399",
+              "leftValue": "={{ $json.authorized }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9fe076f7-49df-5839-9b7c-f593cc04258c",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        880,
+        160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: \"unauthorized\" }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "c3e6d536-f002-5bc7-931c-be31d04ec414",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "89b512ff-b61f-5ee6-ad80-f46f74f0536f",
+      "name": "Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { ...$('Webhook').first().json.body } }];"
+      }
+    },
+    {
+      "id": "6977689c-ef64-5759-9ce6-0f807c6e40f5",
+      "name": "Enroll",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: enroll contact"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token": {
+      "main": [
+        [
+          {
+            "node": "Check key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check key": {
+      "main": [
+        [
+          {
+            "node": "Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request": {
+      "main": [
+        [
+          {
+            "node": "Enroll",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enroll": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  }
+}

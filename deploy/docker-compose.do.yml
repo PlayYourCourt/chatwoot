@@ -36,11 +36,20 @@ services:
     volumes:
       - redis_data:/data
 
+  # SMS sequence engine (deploy/n8n/). Its own env file; its n8n and seq databases are on the managed cluster.
+  n8n:
+    image: n8nio/n8n:2.45.5
+    restart: unless-stopped
+    env_file: .env.n8n
+    volumes:
+      - n8n_data:/home/node/.n8n
+
   caddy:
     image: caddy:2
     restart: unless-stopped
     depends_on:
       - rails
+      - n8n
     ports:
       - '80:80'
       - '443:443'
@@ -52,5 +61,6 @@ services:
 
 volumes:
   redis_data:
+  n8n_data:
   caddy_data:
   caddy_config:

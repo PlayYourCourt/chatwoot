@@ -1,0 +1,572 @@
+{
+  "name": "Seq: housekeeping",
+  "nodes": [
+    {
+      "id": "1de7a290-2373-54e3-bec3-c07ec4623faa",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "f92d8611-d479-5e46-92ac-862af9dd6cf8",
+      "name": "Release stale claims",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        220,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH r AS (UPDATE seq_enrollments SET claimed_at = NULL WHERE status = 'active' AND claimed_at < now() - interval '15 minutes' RETURNING id)\nSELECT count(*)::int AS released FROM r",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "07708018-1d47-5b3b-9ea1-00672bb773ae",
+      "name": "Flag lost sends",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH l AS (UPDATE seq_message_logs SET status = 'unknown', error = 'no outcome recorded within 10 minutes'\n                 WHERE status = 'pending' AND sent_at < now() - interval '10 minutes' RETURNING enrollment_id),\n     e AS (UPDATE seq_enrollments SET status = 'held', held_at = now(), claimed_at = NULL\n           WHERE id IN (SELECT enrollment_id FROM l) AND status = 'active' RETURNING id)\nSELECT count(*)::int AS lost FROM l",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "6119d89e-639a-52b9-9251-a6be1135f710",
+      "name": "Problems",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        660,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT count(*)::int FROM seq_enrollments WHERE status = 'held' AND held_at > now() - interval '16 minutes') AS newly_held,\n  (SELECT count(*)::int FROM seq_enrollments WHERE status = 'active' AND claimed_at IS NULL AND next_run_at < now() - interval '30 minutes') AS overdue,\n  (SELECT count(*)::int FROM seq_enrollments WHERE status = 'active' AND defer_count = 6) AS deferring,\n  (SELECT count(*)::int FROM seq_step_logs WHERE outcome = 'failed' AND ran_at > now() - interval '16 minutes') AS failed_sends,\n  {{ $('Release stale claims').first().json.released }} AS released,\n  {{ $('Flag lost sends').first().json.lost }} AS lost",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "4eeeb94b-2ae5-5985-9d96-8af5b4597011",
+      "name": "Alert text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "\nconst p = $input.first().json;\nconst lines = [];\nif (p.newly_held) lines.push(`${p.newly_held} enrollment(s) moved to held: check the conversation in Chatwoot, then skip or resend (seq_enrollments.status = 'held').`);\nif (p.lost) lines.push(`${p.lost} send(s) had no recorded outcome after 10 minutes (message log status 'unknown').`);\nif (p.released) lines.push(`${p.released} stale claim(s) released (a flow run died mid-way).`);\nif (p.overdue) lines.push(`${p.overdue} due row(s) older than 30 minutes: is the flow workflow active?`);\nif (p.deferring) lines.push(`${p.deferring} enrollment(s) deferred 6 times in a row: check the flow's send window and the inbox hours.`);\nif (p.failed_sends) lines.push(`${p.failed_sends} send(s) failed (rejected by Chatwoot, Twilio or the carrier; delivery failures get a private note on the conversation) in the last 15 minutes.`);\nif (!lines.length) return [];\nreturn [{ json: { subject: 'SMS sequences: ' + lines.length + ' problem(s)', text: lines.join('\\n') + '\\n\\n' + JSON.stringify(p) } }];\n"
+      }
+    },
+    {
+      "id": "f3988860-df74-5e8a-9931-4bfe562bfce4",
+      "name": "Email alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        -120
+      ],
+      "parameters": {
+        "fromEmail": "support@playyourcourt.com",
+        "toEmail": "keith@playyourcourt.com",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "name": "Alerts SMTP",
+          "type": "smtp"
+        }
+      }
+    },
+    {
+      "id": "c750cf8b-b551-508b-b453-fa0501635e58",
+      "name": "Changed contacts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        220,
+        120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.contact_id,\n  (SELECT coalesce(array_agg(a.flow_key), '{}') FROM seq_enrollments a WHERE a.contact_id = c.contact_id AND a.status = 'active') AS active_flows,\n  (SELECT string_agg(l.flow_key || ': ' || CASE l.status\n      WHEN 'active' THEN 'step ' || l.current_step || ', next ' || to_char(l.next_run_at AT TIME ZONE 'UTC', 'Mon DD HH24:MI') || ' UTC'\n      WHEN 'held' THEN 'held, needs a person'\n      WHEN 'completed' THEN 'completed'\n      ELSE 'exited (' || coalesce(l.exit_reason, '') || ')' END, ' | ' ORDER BY l.enrolled_at DESC)\n   FROM (SELECT DISTINCT ON (flow_key) * FROM seq_enrollments b WHERE b.contact_id = c.contact_id ORDER BY flow_key, enrolled_at DESC) l) AS sequence_status\nFROM (SELECT DISTINCT e.contact_id FROM seq_enrollments e\n      WHERE e.enrolled_at > now() - interval '16 minutes' OR e.ended_at > now() - interval '16 minutes' OR e.held_at > now() - interval '16 minutes'\n         OR EXISTS (SELECT 1 FROM seq_step_logs s WHERE s.enrollment_id = e.id AND s.ran_at > now() - interval '16 minutes')) c",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      }
+    },
+    {
+      "id": "65275144-f9fa-5956-abb5-f9e7707a3e86",
+      "name": "Current labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://rails:3000/api/v1/accounts/1/contacts/{{ $json.contact_id }}/labels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Chatwoot API token",
+          "type": "httpHeaderAuth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "362ca1c3-c5e2-5699-b72b-ea1e2dfe3e1f",
+      "name": "Mirror",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        120
+      ],
+      "parameters": {
+        "jsCode": "\nconst changed = $('Changed contacts').all();\nconst out = [];\n$input.all().forEach((item, i) => {\n  const row = changed[i].json;\n  if (item.json.error) return;                               // contact gone or API down: try again next run\n  const current = (item.json.payload || []).filter(l => !l.startsWith('in-sequence-'));\n  const labels = current.concat((row.active_flows || []).map(f => 'in-sequence-' + f));\n  out.push({ json: { contact_id: row.contact_id, labels, sequence_status: row.sequence_status || '' } });\n});\nreturn out;\n"
+      }
+    },
+    {
+      "id": "e19aa00b-b487-5430-a75a-75b39eb202a0",
+      "name": "Set labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://rails:3000/api/v1/accounts/1/contacts/{{ $json.contact_id }}/labels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ labels: $json.labels }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Chatwoot API token",
+          "type": "httpHeaderAuth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "01d6c42c-8587-55dc-bcd0-4fdd1de48d64",
+      "name": "Set status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        120
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://rails:3000/api/v1/accounts/1/contacts/{{ $('Mirror').item.json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ custom_attributes: { sequence_status: $('Mirror').item.json.sequence_status } }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Chatwoot API token",
+          "type": "httpHeaderAuth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "bba49c82-5e50-583f-9831-b384ddbb60bd",
+      "name": "Recent sends",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        220,
+        340
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT coalesce(string_agg(chatwoot_message_id::text, ','), '0') AS ids FROM seq_message_logs\nWHERE status = 'sent' AND chatwoot_message_id IS NOT NULL AND sent_at > now() - interval '3 days'",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      }
+    },
+    {
+      "id": "cc7c4d41-2680-57ee-90e4-f108a14d5e3b",
+      "name": "Failed in Chatwoot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        340
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id AS message_id, m.conversation_id, coalesce(((m.content_attributes #>> '{}')::jsonb)->>'external_error', 'no error text') AS external_error   -- Rails stores this column as a JSON string\nFROM messages m WHERE m.id IN ({{ $json.ids }}) AND m.status = 3",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "chatwoot readonly",
+          "type": "postgres"
+        }
+      }
+    },
+    {
+      "id": "52505bc9-1646-5e86-87dc-30bba978d262",
+      "name": "Failure SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        340
+      ],
+      "parameters": {
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n\nreturn $input.all().map(i => {\n  const m = i.json;\n  const reason = 'delivery_failed: ' + String(m.external_error).slice(0, 300);\n  return { json: { ...m, mark_sql: `WITH l AS (UPDATE seq_message_logs SET status = 'failed', error = ${q(reason)}\n      WHERE chatwoot_message_id = ${Number(m.message_id)} AND status = 'sent' RETURNING enrollment_id, step),\n    s AS (INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason) SELECT enrollment_id, step, 'failed', ${q(reason)} FROM l)\n    SELECT ${Number(m.conversation_id)} AS conversation_id, ${q(m.external_error)} AS external_error, l.step, e.phone, e.status, e.current_step,\n           e.next_run_at, coalesce(f.name, e.flow_key) AS flow_name\n    FROM l JOIN seq_enrollments e ON e.id = l.enrollment_id LEFT JOIN seq_flows f ON f.key = e.flow_key` } };\n});\n"
+      }
+    },
+    {
+      "id": "1e135ff6-da43-58b2-bc0e-3d32a26e76d3",
+      "name": "Mark failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        880,
+        340
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.mark_sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      }
+    },
+    {
+      "id": "f756cd5b-838f-59aa-a4a0-a87f7c86b8a2",
+      "name": "Failure note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        340
+      ],
+      "parameters": {
+        "jsCode": "\nreturn $input.all().filter(i => i.json.conversation_id).map(i => {\n  const r = i.json;\n  const next = r.status === 'active'\n    ? `The sequence is still running: step ${r.current_step} is due ${DateTime.fromISO(new Date(r.next_run_at).toISOString()).toUTC().toFormat('LLL d, HH:mm')} UTC. Fix the number, or add the stop-sequence label to end it.`\n    : `The sequence is no longer running (${r.status}).`;\n  return { json: { conversation_id: r.conversation_id,\n    content: `SMS not delivered: step ${r.step} of the \"${r.flow_name}\" sequence to ${r.phone} failed. Carrier / Twilio said: ${String(r.external_error).replace(/\\s+/g, ' ').trim()}. ${next}` } };\n});\n"
+      }
+    },
+    {
+      "id": "9e9feba1-1585-54ed-9a58-c00d51dd5ab2",
+      "name": "Post failure note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        340
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://rails:3000/api/v1/accounts/1/conversations/{{ $json.conversation_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.content, private: true, message_type: 'outgoing' }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Chatwoot API token",
+          "type": "httpHeaderAuth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "ed8fedeb-8d30-50bf-861d-ec0330b2f983",
+      "name": "Note f470e7e2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -320
+      ],
+      "parameters": {
+        "content": "## Seq: housekeeping\nEvery 15 minutes. Top: release claims older than 15 min, mark sends with no outcome after 10 min as `unknown` and hold their enrollment, then email a summary of anything wrong. Bottom: mirror enrollments that changed since the last run to Chatwoot (`in-sequence-<flow>` labels and the `sequence_status` attribute). Third row: texts from the last 3 days that Twilio or the carrier failed get a private note on their conversation and are marked failed in the log.",
+        "width": 1100,
+        "height": 170,
+        "color": 1
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Release stale claims",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Changed contacts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Recent sends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release stale claims": {
+      "main": [
+        [
+          {
+            "node": "Flag lost sends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flag lost sends": {
+      "main": [
+        [
+          {
+            "node": "Problems",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Problems": {
+      "main": [
+        [
+          {
+            "node": "Alert text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert text": {
+      "main": [
+        [
+          {
+            "node": "Email alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Changed contacts": {
+      "main": [
+        [
+          {
+            "node": "Current labels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Current labels": {
+      "main": [
+        [
+          {
+            "node": "Mirror",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mirror": {
+      "main": [
+        [
+          {
+            "node": "Set labels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set labels": {
+      "main": [
+        [
+          {
+            "node": "Set status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recent sends": {
+      "main": [
+        [
+          {
+            "node": "Failed in Chatwoot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Failed in Chatwoot": {
+      "main": [
+        [
+          {
+            "node": "Failure SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Failure SQL": {
+      "main": [
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark failed": {
+      "main": [
+        [
+          {
+            "node": "Failure note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Failure note": {
+      "main": [
+        [
+          {
+            "node": "Post failure note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  }
+}

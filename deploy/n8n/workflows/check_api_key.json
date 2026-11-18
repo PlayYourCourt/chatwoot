@@ -1,0 +1,129 @@
+{
+  "name": "Seq: check api key",
+  "nodes": [
+    {
+      "id": "44f5cc97-64b0-5608-a293-a1e591299aed",
+      "name": "Token",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "24f71c0a-ab9b-5131-b522-73e1bcc9c007",
+      "name": "Digest",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "value": "={{ $json.token || \"\" }}",
+        "dataPropertyName": "token_digest",
+        "encoding": "hex"
+      }
+    },
+    {
+      "id": "ca667a30-d116-5265-8b30-0e93db2aeaa0",
+      "name": "Lookup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE seq_api_keys SET last_used_at = now() WHERE token_digest = '{{ $json.token_digest }}' AND revoked_at IS NULL RETURNING name, scopes",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "01773db1-1edf-5789-a040-28f3a66c51c8",
+      "name": "Verdict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(i => ({ json: { authorized: !!i.json.name, key_name: i.json.name || null, scopes: i.json.scopes || [] } }));"
+      }
+    },
+    {
+      "id": "7dfae9b1-c2ec-5740-a77b-2955b491a8af",
+      "name": "Note 5850635f",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -200
+      ],
+      "parameters": {
+        "content": "## Seq: check api key\nInput `{token}` (the bearer token or the `key` query parameter). SHA-256 is compared with `seq_api_keys.token_digest`. Returns `{authorized, key_name, scopes}`.",
+        "width": 800,
+        "height": 110,
+        "color": 1
+      }
+    }
+  ],
+  "connections": {
+    "Token": {
+      "main": [
+        [
+          {
+            "node": "Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Digest": {
+      "main": [
+        [
+          {
+            "node": "Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup": {
+      "main": [
+        [
+          {
+            "node": "Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  }
+}

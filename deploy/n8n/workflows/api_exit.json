@@ -1,0 +1,245 @@
+{
+  "name": "Seq API: exit",
+  "nodes": [
+    {
+      "id": "9fa976af-09a5-5f1b-90b8-2f2aecbe10cb",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "exit",
+        "options": {},
+        "responseMode": "responseNode"
+      },
+      "webhookId": "72a1d2a9-80dc-5f8f-84fa-0a10eb8e3ba9"
+    },
+    {
+      "id": "44f5cc97-64b0-5608-a293-a1e591299aed",
+      "name": "Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(i => ({ json: { token: String(i.json.headers.authorization || '').replace(/^Bearer\\s+/i, '') || i.json.query.key || '' } }));"
+      }
+    },
+    {
+      "id": "2c49fe54-8b75-5351-8581-995c8da7944b",
+      "name": "Check key",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: check api key"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "55a979d2-d69c-58b9-8c2f-2d108206d526",
+      "name": "Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3e49dd62-4ea8-5d24-890f-3921bdcda399",
+              "leftValue": "={{ $json.authorized }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9fe076f7-49df-5839-9b7c-f593cc04258c",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        880,
+        160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: \"unauthorized\" }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "c3e6d536-f002-5bc7-931c-be31d04ec414",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ outcome: $json.outcome || \"ok\", exited: $json.exited || 0 }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "bf13863c-ed27-5e5f-ae1a-0ee57e89f081",
+      "name": "Exit SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n\nconst b = $('Webhook').first().json.body || {};\nconst phone = e164(b.phone_number || b.phone);\nif (!phone) return [{ json: { exit_sql: `SELECT 'invalid_phone' AS outcome, 0 AS exited` } }];\nconst flow = b.flow ? ` AND flow_key = ${q(String(b.flow))}` : '';\nconst reason = q(String(b.reason || 'api_exit').slice(0, 100));\nreturn [{ json: { exit_sql: `WITH e AS (UPDATE seq_enrollments SET status = 'exited', ended_at = now(), exit_reason = ${reason}, claimed_at = NULL\n    WHERE phone = ${q(phone)} AND status = 'active'${flow} RETURNING id, current_step),\n  l AS (INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason) SELECT id, current_step, 'exited', ${reason} FROM e RETURNING enrollment_id)\n  SELECT 'ok' AS outcome, count(*)::int AS exited FROM l` } }];\n"
+      }
+    },
+    {
+      "id": "a885c801-83bb-5653-9ee6-0e32c9b99d3c",
+      "name": "Exit enrollments",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.exit_sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token": {
+      "main": [
+        [
+          {
+            "node": "Check key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check key": {
+      "main": [
+        [
+          {
+            "node": "Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Exit SQL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exit SQL": {
+      "main": [
+        [
+          {
+            "node": "Exit enrollments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exit enrollments": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  }
+}

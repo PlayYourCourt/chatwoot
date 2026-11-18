@@ -10,6 +10,13 @@ class DataImports::Salesforce::Setup
     'nurturing' => '#fb923c', 'new' => '#fde047', 'assigned' => '#60a5fa', 'expressed-interest' => '#c084fc'
   }.freeze
 
+  # SMS sequence flows (deploy/n8n/): each gets an enroll-<key> label agents can add to start it, and an
+  # in-sequence-<key> label the engine keeps on contacts while they are in it
+  SEQUENCE_FLOWS = %w[lessons membership].freeze
+  SEQUENCE_LABELS = { 'stop-sequence' => '#dc2626' }.merge(
+    SEQUENCE_FLOWS.flat_map { |key| [["enroll-#{key}", '#2563eb'], ["in-sequence-#{key}", '#a855f7']] }.to_h
+  ).freeze
+
   # key => [display name, type, list values]
   CONTACT_ATTRIBUTES = {
     'salesforce_id' => ['Salesforce ID', 'text'],
@@ -44,7 +51,7 @@ class DataImports::Salesforce::Setup
     'preferred_location' => ['Preferred Location', 'text'],
     'gender' => %w[Gender text],
     'postal_code' => ['Postal Code', 'text'],
-    'timezone' => %w[Timezone text],
+    'timezone' => %w[Timezone text], # IANA name, e.g. America/Chicago
     'first_contact_at' => ['First Contact', 'date'],
     'last_inbound_contact_at' => ['Last Inbound Contact', 'date'],
     'support_profile_url' => ['Support Profile', 'link'],
@@ -56,7 +63,10 @@ class DataImports::Salesforce::Setup
     'email_opted_out' => ['Email Opted Out', 'checkbox'],
     'do_not_call' => ['Do Not Call', 'checkbox'],
     # set by KlaviyoListener when the contact texts STOP, cleared by START
-    'sms_opted_out_at' => ['SMS Opted Out', 'date']
+    'sms_opted_out_at' => ['SMS Opted Out', 'date'],
+    # read and written by the n8n SMS sequence engine (deploy/n8n/): timezone is an IANA name
+    'timezone_source' => ['Timezone Source', 'list', %w[salesforce contact phone default]],
+    'sequence_status' => ['Sequence Status', 'text']
   }.freeze
 
   CONVERSATION_ATTRIBUTES = {
@@ -84,7 +94,7 @@ class DataImports::Salesforce::Setup
   pattr_initialize [:account!]
 
   def perform
-    LABEL_COLORS.each { |title, color| account.labels.find_or_create_by!(title: title) { |label| label.color = color } }
+    LABEL_COLORS.merge(SEQUENCE_LABELS).each { |title, color| account.labels.find_or_create_by!(title: title) { |label| label.color = color } }
     define(:contact_attribute, CONTACT_ATTRIBUTES)
     define(:conversation_attribute, CONVERSATION_ATTRIBUTES)
     { labels: account.labels.count, custom_attribute_definitions: account.custom_attribute_definitions.count }

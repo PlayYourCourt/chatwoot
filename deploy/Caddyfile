@@ -4,3 +4,9 @@
 	encode gzip
 	reverse_proxy rails:3000
 }
+
+# n8n editor + webhooks (deploy/n8n/). N8N_HOST comes from .env.do.
+{$N8N_HOST} {
+	encode gzip
+	reverse_proxy n8n:5678
+}

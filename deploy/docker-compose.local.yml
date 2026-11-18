@@ -63,7 +63,20 @@ services:
     ports:
       - '127.0.0.1:8025:8025'
 
+  # SMS sequence engine (deploy/n8n/); its n8n and seq databases live in the postgres service above
+  n8n:
+    image: n8nio/n8n:2.45.5
+    restart: unless-stopped
+    env_file: .env.n8n
+    depends_on:
+      - postgres
+    ports:
+      - '127.0.0.1:5678:5678'
+    volumes:
+      - n8n_data:/home/node/.n8n
+
 volumes:
   storage_data:
   postgres_data:
   redis_data:
+  n8n_data:

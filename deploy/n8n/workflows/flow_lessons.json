@@ -1,0 +1,1230 @@
+{
+  "name": "Flow: lessons",
+  "nodes": [
+    {
+      "id": "84e0bbab-11a0-5a80-aeb3-39f5c9521883",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "e2a536be-f75c-56b3-becf-99c45e7d241a",
+      "name": "Flow config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "42938c5a-4800-5b66-86e8-a5f8f1a43325",
+              "name": "key",
+              "type": "string",
+              "value": "lessons"
+            },
+            {
+              "id": "3b78dfe2-6f03-5ca5-9902-615918fbc7a1",
+              "name": "name",
+              "type": "string",
+              "value": "Lessons lead drip"
+            },
+            {
+              "id": "f908350c-9169-5982-9879-947a8ae8259f",
+              "name": "status",
+              "type": "string",
+              "value": "paused"
+            },
+            {
+              "id": "30e9494d-4958-5e7c-b626-102b01af3247",
+              "name": "inbox_id",
+              "type": "number",
+              "value": 5
+            },
+            {
+              "id": "2ec8d871-c183-595f-9457-c33501bedb95",
+              "name": "reentry_policy",
+              "type": "string",
+              "value": "never"
+            },
+            {
+              "id": "f6145c57-bfbb-5ec8-a5ba-a0702f3ebab6",
+              "name": "reentry_cooldown_days",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "id": "ea7c7f14-296e-59e5-9553-b6e235ecb91a",
+              "name": "end_rules",
+              "type": "array",
+              "value": "[{\"rule\": \"replied\"}, {\"rule\": \"agent_messaged\"}, {\"rule\": \"purchased\"}, {\"rule\": \"field\", \"field\": \"drip_step\", \"op\": \"set\"}, {\"rule\": \"no_prior_conversation\", \"inbox_ids\": [5, 86]}]"
+            },
+            {
+              "id": "8b62d0b1-d627-5eab-b292-3bc4e06f7b84",
+              "name": "business_hours",
+              "type": "boolean",
+              "value": true
+            },
+            {
+              "id": "9f38474e-2ca6-5bd6-8d0a-269b10b2772c",
+              "name": "holidays",
+              "type": "array",
+              "value": "[]"
+            },
+            {
+              "id": "3f4793c7-a392-55bb-b7df-6546d9c6712c",
+              "name": "flow_window_open",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "eee2ec69-0540-57db-89e0-5cba0ae7b6bb",
+              "name": "flow_window_close",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "c0d13fbf-dfae-52b9-a785-6bebbf9614ae",
+              "name": "spread_hours",
+              "type": "number",
+              "value": 3
+            },
+            {
+              "id": "46a20c53-af68-5fab-bfa8-bfd18f65faac",
+              "name": "on_send_failure",
+              "type": "string",
+              "value": "continue"
+            },
+            {
+              "id": "8e8e08f3-9e9f-57d6-93fa-a458cbb882fc",
+              "name": "rep_first_name",
+              "type": "string",
+              "value": "Adam"
+            },
+            {
+              "id": "96025543-d536-5f6e-a40e-3e4337b6665e",
+              "name": "rep_phone",
+              "type": "string",
+              "value": "+13013752751"
+            },
+            {
+              "id": "059246cc-3ebb-5c45-a5a5-0e607220db1b",
+              "name": "checkout_url",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "color": 3
+    },
+    {
+      "id": "984f3e2d-c06a-5e83-a213-ec66ebb89a3e",
+      "name": "Register flow",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO seq_flows (key, name, status, inbox_id, reentry_policy, reentry_cooldown_days, end_rules, send_window, spread_hours, on_send_failure, vars, updated_at)\nSELECT c.key, c.name, c.status, c.inbox_id, c.reentry_policy, c.reentry_cooldown_days, c.end_rules,\n       jsonb_strip_nulls(jsonb_build_object('business_hours', c.business_hours, 'holidays', c.holidays,\n         'flow_window', CASE WHEN c.flow_window_open <> '' AND c.flow_window_close <> ''\n                             THEN jsonb_build_object('open', c.flow_window_open, 'close', c.flow_window_close) END)),\n       c.spread_hours, c.on_send_failure,\n       jsonb_strip_nulls(jsonb_build_object('rep_first_name', nullif(c.rep_first_name, ''), 'rep_phone', nullif(c.rep_phone, ''),\n                                            'checkout_url', nullif(c.checkout_url, ''))),\n       now()\nFROM jsonb_to_record('{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb)\n     AS c(key text, name text, status text, inbox_id integer, reentry_policy text, reentry_cooldown_days integer, end_rules jsonb,\n          business_hours boolean, holidays jsonb, flow_window_open text, flow_window_close text, spread_hours integer, on_send_failure text,\n          rep_first_name text, rep_phone text, checkout_url text)\nON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, status = EXCLUDED.status, inbox_id = EXCLUDED.inbox_id,\n  reentry_policy = EXCLUDED.reentry_policy, reentry_cooldown_days = EXCLUDED.reentry_cooldown_days, end_rules = EXCLUDED.end_rules,\n  send_window = EXCLUDED.send_window, spread_hours = EXCLUDED.spread_hours, on_send_failure = EXCLUDED.on_send_failure,\n  vars = EXCLUDED.vars, updated_at = now()\nRETURNING key, status, inbox_id",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      }
+    },
+    {
+      "id": "cf39af24-8e47-5dc8-9ce4-56a801a3c9a5",
+      "name": "Claim due rows",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH claimed AS (\n  UPDATE seq_enrollments e SET claimed_at = now()\n  WHERE e.id IN (SELECT id FROM seq_enrollments\n                 WHERE flow_key = '{{ $json.key }}' AND '{{ $json.status }}' = 'active' AND status = 'active' AND next_run_at <= now() AND claimed_at IS NULL\n                 ORDER BY next_run_at LIMIT 200 FOR UPDATE SKIP LOCKED)\n  RETURNING e.*)\nSELECT claimed.*, row_to_json(f)::jsonb AS flow FROM claimed JOIN seq_flows f ON f.key = claimed.flow_key WHERE f.status = 'active'",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      }
+    },
+    {
+      "id": "072053ea-05bd-579b-bb84-692dc56687ad",
+      "name": "Gate",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: Gate"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "4a002c62-0189-5843-8737-beb867389491",
+      "name": "Send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b9c618e2-63e2-58d1-9770-6c3519f246d8",
+              "leftValue": "={{ $json.decision }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "send"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e86cba8d-a022-5469-80d2-a3afd2a6de40",
+      "name": "Defer or exit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1320,
+        160
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.writeback_sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "743c1ba0-ba22-5d49-acc0-8ec34cbe2de5",
+      "name": "Exited?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1540,
+        160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e9b70232-6807-5c78-8c48-d615c1cc0040",
+              "leftValue": "={{ $('Gate').item.json.decision }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "exit"
+            },
+            {
+              "id": "454ca4e8-a27e-58ba-98ff-1b943901e8fd",
+              "leftValue": "={{ $('Gate').item.json.conversation_id }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a358ace2-38e7-5d0b-b2a8-b67a3e308cd5",
+      "name": "Exit note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        160
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://rails:3000/api/v1/accounts/1/conversations/{{ $('Gate').item.json.conversation_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $('Gate').item.json.exit_note, private: true, message_type: 'outgoing' }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Chatwoot API token",
+          "type": "httpHeaderAuth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "id": "de5edf09-88b6-5c7b-a660-9b29652b780f",
+      "name": "Step",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        1320,
+        -40
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cb731921-f257-531a-9bc8-413291bee542",
+                    "leftValue": "={{ $json.current_step }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "1"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "1"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "db69811b-1bbc-57a8-9454-82dc0a2b2f72",
+                    "leftValue": "={{ $json.current_step }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "2"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "2"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "433c35f4-a4cc-5fbf-814c-416673bdcfff",
+                    "leftValue": "={{ $json.current_step }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "3"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "3"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "16cc16bb-38f0-504b-9ff3-ed84fff6a9c6",
+                    "leftValue": "={{ $json.current_step }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "4"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "4"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "57c736db-a154-5230-abeb-61cc10d0813c",
+                    "leftValue": "={{ $json.current_step }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "5"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "5"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "4818313a-edeb-5e3a-a2da-1bb0af41b13f",
+                    "leftValue": "={{ $json.current_step }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "6"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "6"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "05e585c6-4338-50ba-9019-48c5944052ec",
+      "name": "Note 2ac9982c",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -300
+      ],
+      "parameters": {
+        "content": "## Flow: lessons\nEvery minute: save **Flow config** to the database \u2192 claim up to 200 due rows \u2192 Gate \u2192 one lane per step (top to bottom, in order); Send advances the row; an exit leaves a private note on the conversation. Marketers edit only the yellow nodes and publish. **Flow config**: `inbox_id` is the Chatwoot inbox (channel) the texts go out on; `status` is `paused` until you set it to `active` (paused: no enrollments, no sends); `reentry_policy` never / after_completion / after_exit / always; `holidays` are dates like \"2026-12-25\"; `flow_window_open`/`close` (\"10:00\"/\"18:00\", contact-local) are optional; `rep_first_name`, `rep_phone` and `checkout_url` fill the matching placeholders (the enroll webhook can send a per-contact `checkout_url`). **Step config**: message, delay_to_next, delay_unit. `{{first_name}}`, `{{name}}`, `{{rep_first_name}}`, `{{rep_phone}}`, `{{checkout_url}}` and any contact attribute key are placeholders. Never connect one lane to another.",
+        "width": 1400,
+        "height": 210,
+        "color": 1
+      }
+    },
+    {
+      "id": "87032507-9a5f-5a76-985b-ba8c910f0405",
+      "name": "Step 1 config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5197b595-99c4-53e8-920c-d86e4320a62f",
+              "name": "message",
+              "type": "string",
+              "value": "Hey {{first_name}}, I understand you're looking for tennis lessons - I'm {{rep_first_name}}, your dedicated account manager at PlayYourCourt. Let me know when you can chat or text to review coaches and hear how this works. You can text me or call me at {{rep_phone}}. Would you like to see coach options now? ... Also, I'm a real person, but if you don't want me to text you, just reply stop."
+            },
+            {
+              "id": "0b6fbba4-e8ce-571e-9122-f79808ca349e",
+              "name": "delay_to_next",
+              "type": "number",
+              "value": 1
+            },
+            {
+              "id": "bb24d616-5692-50d3-9b9a-2599bf81263a",
+              "name": "delay_unit",
+              "type": "string",
+              "value": "days"
+            },
+            {
+              "id": "23864ea1-32db-5eb8-a408-e52b4d0dc5b4",
+              "name": "next_step",
+              "type": "string",
+              "value": "2"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "color": 3
+    },
+    {
+      "id": "fedc49d1-9295-5e79-8c03-b9e2f9460088",
+      "name": "Send step 1",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: Send"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "641f277d-db2f-5821-a072-1d688b7d2cad",
+      "name": "Note 33b2710d",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        90
+      ],
+      "parameters": {
+        "content": "**Step 1** \u00b7 quick SMS, day 0\nthen wait 1 days",
+        "width": 420,
+        "height": 70,
+        "color": 5
+      }
+    },
+    {
+      "id": "38cfa4ca-e918-5fcf-9123-79765ffbd99f",
+      "name": "Step 2 config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1540,
+        200
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "15427516-7632-590d-859d-51c7a8982681",
+              "name": "message",
+              "type": "string",
+              "value": "Hey {{first_name}}, This is {{rep_first_name}}. I wanted to check back to see if you're still interested in tennis lessons? When did you want to get started?"
+            },
+            {
+              "id": "ac3373a8-a148-544f-9393-1ec11093bb31",
+              "name": "delay_to_next",
+              "type": "number",
+              "value": 1
+            },
+            {
+              "id": "d8667e37-3b51-5f84-89e3-10a18ef761ee",
+              "name": "delay_unit",
+              "type": "string",
+              "value": "days"
+            },
+            {
+              "id": "2321f070-7abb-587c-8d4e-a0268cf3fbcf",
+              "name": "next_step",
+              "type": "string",
+              "value": "3"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "color": 3
+    },
+    {
+      "id": "d6ab373a-2c64-5e24-a57f-a417eabc3005",
+      "name": "Send step 2",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1760,
+        200
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: Send"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "78bbefa6-c065-56be-af4f-c0171b6d68a6",
+      "name": "Note de170901",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        290
+      ],
+      "parameters": {
+        "content": "**Step 2** \u00b7 24 hours\nthen wait 1 days",
+        "width": 420,
+        "height": 70,
+        "color": 5
+      }
+    },
+    {
+      "id": "2a5d3dd0-0c24-5b88-8d09-3619bed82063",
+      "name": "Step 3 config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1540,
+        400
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "55a45dfa-cbe9-5aef-8c2f-a12b5be0304b",
+              "name": "message",
+              "type": "string",
+              "value": "Hey, {{first_name}} I really don't want to bother you. Let me know if you're still interested in tennis lessons. You can call or text me at {{rep_phone}}. Take care until then, {{rep_first_name}}."
+            },
+            {
+              "id": "4c2e5194-f5ed-541a-a196-4988b66fa95e",
+              "name": "delay_to_next",
+              "type": "number",
+              "value": 5
+            },
+            {
+              "id": "b2a180be-8b86-57b4-9147-bde9b75d5d44",
+              "name": "delay_unit",
+              "type": "string",
+              "value": "days"
+            },
+            {
+              "id": "8787fb19-97f3-556e-b9d6-46944120a98b",
+              "name": "next_step",
+              "type": "string",
+              "value": "4"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "color": 3
+    },
+    {
+      "id": "13b7639b-441b-5549-a967-cd13a7a1f42a",
+      "name": "Send step 3",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1760,
+        400
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: Send"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "3bc3d65a-0139-501e-8f66-6d5fd7e0b272",
+      "name": "Note 93e78680",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        490
+      ],
+      "parameters": {
+        "content": "**Step 3** \u00b7 48 hours\nthen wait 5 days",
+        "width": 420,
+        "height": 70,
+        "color": 5
+      }
+    },
+    {
+      "id": "55048da9-f505-5929-90ae-3a65faba0b24",
+      "name": "Step 4 config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1540,
+        600
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "89a0be18-c3c7-586e-934d-2a32b4a9736f",
+              "name": "message",
+              "type": "string",
+              "value": "Hey {{first_name}}, It's {{rep_first_name}} at PlayYourCourt. How've you been? Wanted to see if it's a better time to try and set up tennis lessons? You can call or text me at {{rep_phone}}."
+            },
+            {
+              "id": "645715b1-eae9-5aa9-909e-b59fb5f6b50b",
+              "name": "delay_to_next",
+              "type": "number",
+              "value": 7
+            },
+            {
+              "id": "c6cf1d1c-b3bc-527c-b96e-941a0b7a113b",
+              "name": "delay_unit",
+              "type": "string",
+              "value": "days"
+            },
+            {
+              "id": "c3c5b96e-9d82-5be6-8105-a4de36e7e67b",
+              "name": "next_step",
+              "type": "string",
+              "value": "5"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "color": 3
+    },
+    {
+      "id": "8a301e4f-dea8-5b51-9fa3-3c01eccb8d54",
+      "name": "Send step 4",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1760,
+        600
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: Send"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "f47f3f00-a1d2-57d0-9668-e8eaf07bf1cc",
+      "name": "Note 2cbd52da",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        690
+      ],
+      "parameters": {
+        "content": "**Step 4** \u00b7 7 days\nthen wait 7 days",
+        "width": 420,
+        "height": 70,
+        "color": 5
+      }
+    },
+    {
+      "id": "b37dc51b-883e-56fc-9ff6-5d8e1716b3ec",
+      "name": "Step 5 config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1540,
+        800
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "78e0aff7-98c5-5c6a-9206-f1e6f7612205",
+              "name": "message",
+              "type": "string",
+              "value": "Hey {{first_name}}, {{rep_first_name}} here from PlayYourCourt. I have a few great coaches with openings right now. Want me to send you some options? You can call or text me at {{rep_phone}}."
+            },
+            {
+              "id": "efbae759-6de8-5233-9161-206b62245a75",
+              "name": "delay_to_next",
+              "type": "number",
+              "value": 28
+            },
+            {
+              "id": "7d045a90-29d1-587d-905f-7f03c3ddf95e",
+              "name": "delay_unit",
+              "type": "string",
+              "value": "days"
+            },
+            {
+              "id": "5ddafdd4-3d64-5a94-b8a8-e58e6243b4e1",
+              "name": "next_step",
+              "type": "string",
+              "value": "6"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "color": 3
+    },
+    {
+      "id": "3d8e57c0-516c-5405-b5a2-cf231a27c758",
+      "name": "Send step 5",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1760,
+        800
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: Send"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "834fdcb2-d0a2-524d-b28f-971666f38729",
+      "name": "Note f7080f2f",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        890
+      ],
+      "parameters": {
+        "content": "**Step 5** \u00b7 14 days\nthen wait 28 days",
+        "width": 420,
+        "height": 70,
+        "color": 5
+      }
+    },
+    {
+      "id": "61f9321e-f75e-5599-bcae-fcde69d494ef",
+      "name": "Step 6 config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1540,
+        1000
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "174696ca-98d3-5370-a739-f4f8abab3fa3",
+              "name": "message",
+              "type": "string",
+              "value": "Hey {{first_name}}, We know it's tough to find tennis coaches these days. Were you ever able to find a coach?"
+            },
+            {
+              "id": "7ace0a9c-38ad-5f02-b85d-283011686c2c",
+              "name": "delay_to_next",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "id": "cfda02d3-3e24-5398-aa92-91233181fb2c",
+              "name": "delay_unit",
+              "type": "string",
+              "value": "days"
+            },
+            {
+              "id": "4a98a64d-b0c2-5cdc-8e72-8c7d7ca5aa48",
+              "name": "next_step",
+              "type": "string",
+              "value": "done"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "color": 3
+    },
+    {
+      "id": "18992684-613e-5d79-af5b-8e6185326680",
+      "name": "Send step 6",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1760,
+        1000
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Seq: Send"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": null
+        },
+        "mode": "once",
+        "options": {}
+      }
+    },
+    {
+      "id": "5aad712c-378d-576b-a564-b916142ae4e9",
+      "name": "Note 0575f706",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        1090
+      ],
+      "parameters": {
+        "content": "**Step 6** \u00b7 6 weeks, final",
+        "width": 420,
+        "height": 70,
+        "color": 5
+      }
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Flow config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flow config": {
+      "main": [
+        [
+          {
+            "node": "Register flow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register flow": {
+      "main": [
+        [
+          {
+            "node": "Claim due rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim due rows": {
+      "main": [
+        [
+          {
+            "node": "Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate": {
+      "main": [
+        [
+          {
+            "node": "Send?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send?": {
+      "main": [
+        [
+          {
+            "node": "Step",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Defer or exit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Defer or exit": {
+      "main": [
+        [
+          {
+            "node": "Exited?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exited?": {
+      "main": [
+        [
+          {
+            "node": "Exit note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step": {
+      "main": [
+        [
+          {
+            "node": "Step 1 config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Step 2 config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Step 3 config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Step 4 config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Step 5 config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Step 6 config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step 1 config": {
+      "main": [
+        [
+          {
+            "node": "Send step 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step 2 config": {
+      "main": [
+        [
+          {
+            "node": "Send step 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step 3 config": {
+      "main": [
+        [
+          {
+            "node": "Send step 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step 4 config": {
+      "main": [
+        [
+          {
+            "node": "Send step 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step 5 config": {
+      "main": [
+        [
+          {
+            "node": "Send step 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step 6 config": {
+      "main": [
+        [
+          {
+            "node": "Send step 6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  }
+}

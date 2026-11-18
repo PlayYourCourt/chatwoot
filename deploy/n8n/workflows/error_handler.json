@@ -1,0 +1,77 @@
+{
+  "name": "Seq: error handler",
+  "nodes": [
+    {
+      "id": "7046e501-c3f9-54a0-8f97-d4f8901b6a06",
+      "name": "Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "f3988860-df74-5e8a-9931-4bfe562bfce4",
+      "name": "Email alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "support@playyourcourt.com",
+        "toEmail": "keith@playyourcourt.com",
+        "subject": "={{ \"n8n error: \" + $json.workflow.name }}",
+        "emailFormat": "text",
+        "text": "={{ 'Workflow: ' + $json.workflow.name + '\\nExecution: ' + ($json.execution.url || $json.execution.id) + '\\nNode: ' + (($json.execution.lastNodeExecuted) || '?') + '\\n\\n' + JSON.stringify($json.execution.error, null, 2).slice(0, 4000) }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "name": "Alerts SMTP",
+          "type": "smtp"
+        }
+      }
+    },
+    {
+      "id": "9598e792-1a1c-531f-a63b-a7440328eadd",
+      "name": "Note f761232c",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -180
+      ],
+      "parameters": {
+        "content": "## Seq: error handler\nSet as the Error Workflow of every engine workflow (Settings \u2192 Error workflow). Housekeeping releases the claims of a failed run.",
+        "width": 700,
+        "height": 100,
+        "color": 1
+      }
+    }
+  ],
+  "connections": {
+    "Error": {
+      "main": [
+        [
+          {
+            "node": "Email alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  }
+}
