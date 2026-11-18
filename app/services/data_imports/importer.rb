@@ -187,6 +187,7 @@ class DataImports::Importer
     mapped_conversation = mapping&.chatwoot_record
     if mapped_conversation && mapping.data_import_id != @data_import.id
       skip_already_imported_item(item, mapping, already_handled: already_handled)
+      refresh_mapped_conversation(mapped_conversation, conversation)
       reconcile_item_stats('conversation') if already_handled
       return unless import_conversation_messages(conversation, mapped_conversation, contact)
 
@@ -255,7 +256,10 @@ class DataImports::Importer
   def import_contact_item(item, contact_payload, source_id, already_handled)
     mapping = find_mapping('contact', source_id)
     mapped_contact = mapping&.chatwoot_record
-    return reuse_mapped_contact(item, mapping, mapped_contact, already_handled: already_handled) if mapped_contact
+    if mapped_contact
+      refresh_mapped_contact(mapped_contact, contact_payload) if mapping.data_import_id != @data_import.id
+      return reuse_mapped_contact(item, mapping, mapped_contact, already_handled: already_handled)
+    end
 
     contact = Contact.transaction do
       imported_contact = find_existing_contact(contact_payload) || create_contact(contact_payload)
@@ -298,6 +302,11 @@ class DataImports::Importer
     skip_already_imported_item(item, mapping, already_handled: already_handled)
     mapped_contact
   end
+
+  # Hooks for providers that re-apply source state to records a previous import created (see Salesforce's refresh mode).
+  def refresh_mapped_conversation(_chatwoot_conversation, _conversation); end
+
+  def refresh_mapped_contact(_contact, _contact_payload); end
 
   def update_existing_contact(contact, contact_payload)
     attrs = contact_attributes(contact_payload)

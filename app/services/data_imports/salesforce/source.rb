@@ -14,13 +14,20 @@ class DataImports::Salesforce::Source
 
   attr_reader :provider, :display_name, :contacts_per_page, :conversations_per_page, :phase, :since
 
+  # Re-apply Salesforce state (conversation status, owner, team, priority, labels; contact attributes) to records
+  # an earlier import created. For re-imports made while Salesforce is still the system of record.
+  def refresh?
+    @refresh
+  end
+
   def self.credentials_validator(source_params:, import_types:)
     DataImports::Salesforce::CredentialsValidator.new(source_params: source_params, import_types: import_types)
   end
 
   def self.source_metadata(source_params)
     params = source_params.to_h.with_indifferent_access
-    { 'phase' => params[:phase].presence || 'salesforce', 'since' => params[:since].presence }.compact
+    { 'phase' => params[:phase].presence || 'salesforce', 'since' => params[:since].presence,
+      'refresh' => (true if params[:refresh].present?) }.compact
   end
 
   def self.default_import_name
@@ -63,6 +70,7 @@ class DataImports::Salesforce::Source
     metadata = source_metadata.to_h.with_indifferent_access
     @phase = PHASES.include?(metadata[:phase]) ? metadata[:phase] : 'salesforce'
     @since = metadata[:since].present? ? Time.zone.parse(metadata[:since].to_s) : nil
+    @refresh = metadata[:refresh] == true
     @normalizer = DataImports::Salesforce::Normalizer.new
   end
 

@@ -83,6 +83,57 @@ Every imported record carries the full source row(s) under `additional_attribute
 EmailMessage/Interaction/Note minus the body). Keep the staging DB (or `pg_dump` it to Spaces) as the
 archive; `salesforce_id` on every record is the key back into it.
 
+## Production (Droplet)
+
+Same pipeline, run on the Droplet; the staging container joins the `chatwoot` compose network there too.
+Disk: ~15 GB staging plus ~10 GB Chatwoot growth; the Droplet's 160 GB covers it.
+
+```bash
+# 0. copy the export up (from your machine); keep the folder name so the loader finds every part
+rsync -av --progress "sales_force_exports/nov 18/" root@<droplet>:/opt/chatwoot/sales_force_exports/nov\ 18/
+
+# on the Droplet, from the repo checkout
+cd /opt/chatwoot
+grep -E 'SALESFORCE_STAGING_DATABASE_URL|SALESFORCE_OWNER_EMAILS' deploy/.env.do   # both must be set
+docker compose -f deploy/salesforce/docker-compose.staging.yml up -d
+deploy/salesforce/load_staging.sh "sales_force_exports/nov 18"      # 30–60 min
+deploy/salesforce/transform.sh                                     # 10–20 min, prints counts
+
+R="docker compose -f deploy/docker-compose.do.yml exec rails bundle exec rails"
+$R "salesforce:setup[1]"                      # labels, attributes, teams used by the import (idempotent)
+$R "salesforce:import[1,salesforce]"          # full Salesforce era; runs in Sidekiq, resumable
+$R "salesforce:report[1]"                     # progress; also Settings → Data in the dashboard
+$R "salesforce:import[1,freshdesk]"           # second pass once the first reports complete
+```
+
+Afterwards, `salesforce:relocate_inbox[<placeholder>,<twilio inbox>]` for each number that now has a real Twilio
+inbox, then stop the staging container (`docker compose -f deploy/salesforce/docker-compose.staging.yml down`;
+keep the volume, or `pg_dump` it to Spaces as the archive).
+
+## Re-importing a newer export
+
+Load and transform the new export over the old staging data (the loader truncates each table), then run
+`salesforce:import` again. What happens to each kind of record:
+
+| Record | Already imported (mapped by Salesforce id) | New in this export |
+|---|---|---|
+| Contact | **left as is**: name, email, phone, custom attributes, type are not touched | created |
+| Conversation | **left as is**: status, owner, team, priority, labels are not touched | created with its state |
+| Message | skipped | appended to its conversation, even an existing one |
+
+So by default a lead whose Salesforce status changed since the last import keeps the status it has in Chatwoot,
+which is what you want once agents work in Chatwoot (the import must not undo their changes).
+
+While Salesforce is still the system of record, add `refresh` to make its state win:
+
+```bash
+$R "salesforce:import[1,salesforce,,refresh]"
+```
+
+A refresh import re-applies to already-imported records: conversation status (and snooze), owner, team,
+priority and labels (added, never removed); contact name, type (lead → customer only) and custom /
+source attributes. Email and phone are never changed by a refresh. Nothing is deleted.
+
 ## Re-running a stage
 
 - Loader: `ONLY=interaction,legacy_note deploy/salesforce/load_staging.sh "<zip dir>"` truncates and reloads those tables.

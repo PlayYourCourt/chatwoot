@@ -13,8 +13,9 @@ namespace :salesforce do
     puts "Account #{account.id}: #{DataImports::Salesforce::Setup.new(account: account).perform}"
   end
 
-  desc 'Start a Salesforce import from the staging DB. Usage: rails "salesforce:import[ACCOUNT_ID,salesforce|freshdesk,2026-08-10]"'
-  task :import, [:account_id, :phase, :since] => :environment do |_task, args|
+  desc 'Start a Salesforce import from the staging DB. Usage: rails "salesforce:import[ACCOUNT_ID,salesforce|freshdesk,2026-08-10,refresh]" ' \
+       '(refresh: re-apply Salesforce state to records an earlier import created)'
+  task :import, [:account_id, :phase, :since, :refresh] => :environment do |_task, args|
     account = Account.find(args[:account_id])
     initiated_by = account.administrators.first
     phase = args[:phase].presence || 'salesforce'
@@ -24,9 +25,10 @@ namespace :salesforce do
       source_params: {
         source_provider: 'salesforce',
         access_token: 'staging',
-        name: ['Salesforce', phase, args[:since].presence].compact.join(' '),
+        name: ['Salesforce', phase, args[:since].presence, args[:refresh].presence].compact.join(' '),
         phase: phase,
         since: args[:since].presence,
+        refresh: args[:refresh].presence,
         import_types: DataImport::IMPORT_TYPES
       }
     ).perform

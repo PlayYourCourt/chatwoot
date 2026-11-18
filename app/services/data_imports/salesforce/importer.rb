@@ -37,16 +37,37 @@ class DataImports::Salesforce::Importer < DataImports::Importer
   end
 
   def create_conversation(conversation, contact, contact_inbox, inbox, source_type)
-    super.tap do |chatwoot_conversation|
-      apply_labels(chatwoot_conversation, Array(conversation['labels']))
-      chatwoot_conversation.update_columns(
-        conversation_state(conversation).merge(
-          priority: Conversation.priorities[conversation['priority']],
-          assignee_id: owner_agent_id(conversation['custom']),
-          team_id: object_team_id(conversation['sf_object'])
-        )
+    super.tap { |chatwoot_conversation| apply_salesforce_state(chatwoot_conversation, conversation) }
+  end
+
+  def refresh_mapped_conversation(chatwoot_conversation, conversation)
+    apply_salesforce_state(chatwoot_conversation, conversation) if @source.refresh?
+  end
+
+  # A refresh never changes email/phone (uniqueness against other contacts) and never demotes a customer to a lead.
+  def refresh_mapped_contact(contact, contact_payload)
+    return unless @source.refresh?
+
+    attrs = contact_attributes(contact_payload)
+    updates = {
+      additional_attributes: contact.additional_attributes.to_h.deep_merge(attrs[:additional_attributes].to_h),
+      custom_attributes: contact.custom_attributes.to_h.deep_merge(attrs[:custom_attributes].to_h),
+      updated_at: Time.current
+    }
+    updates[:name] = attrs[:name] if attrs[:name].present?
+    updates[:contact_type] = attrs[:contact_type] if attrs[:contact_type] == Contact.contact_types[:customer]
+    contact.update_columns(updates)
+  end
+
+  def apply_salesforce_state(chatwoot_conversation, conversation)
+    apply_labels(chatwoot_conversation, Array(conversation['labels']))
+    chatwoot_conversation.update_columns(
+      conversation_state(conversation).merge(
+        priority: Conversation.priorities[conversation['priority']],
+        assignee_id: owner_agent_id(conversation['custom']),
+        team_id: object_team_id(conversation['sf_object'])
       )
-    end
+    )
   end
 
   # Unresolved threads with a due date still ahead are snoozed until it, so they come back on their own.

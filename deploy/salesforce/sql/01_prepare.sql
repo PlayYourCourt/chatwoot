@@ -11,6 +11,23 @@ CREATE OR REPLACE FUNCTION sf.ts(v text) RETURNS timestamptz LANGUAGE sql IMMUTA
   SELECT CASE WHEN sf.nz(v) IS NULL THEN NULL ELSE sf.nz(v)::timestamp AT TIME ZONE 'UTC' END
 $$;
 
+-- Salesforce timezone picklists (Rails zone names) -> IANA, which is what the n8n sequence engine needs.
+-- Values that already look like IANA names pass through; anything else is NULL.
+CREATE OR REPLACE FUNCTION sf.iana_tz(v text) RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN sf.nz(v) IS NULL THEN NULL
+    WHEN btrim(v) ~ '^[A-Za-z]+/[A-Za-z_]+' THEN btrim(v)
+    WHEN btrim(v) IN ('Eastern Time (US & Canada)', 'Eastern', 'EST', 'EDT') THEN 'America/New_York'
+    WHEN btrim(v) IN ('Central Time (US & Canada)', 'Central', 'CST', 'CDT') THEN 'America/Chicago'
+    WHEN btrim(v) IN ('Mountain Time (US & Canada)', 'Mountain', 'MST', 'MDT') THEN 'America/Denver'
+    WHEN btrim(v) IN ('Pacific Time (US & Canada)', 'Pacific', 'PST', 'PDT') THEN 'America/Los_Angeles'
+    WHEN btrim(v) = 'Arizona' THEN 'America/Phoenix'
+    WHEN btrim(v) = 'Alaska' THEN 'America/Anchorage'
+    WHEN btrim(v) = 'Hawaii' THEN 'Pacific/Honolulu'
+    WHEN btrim(v) = 'Atlantic Time (Canada)' THEN 'America/Halifax'
+    ELSE NULL END
+$$;
+
 -- E.164 for US-centric data: 10 digits -> +1, 11 digits starting with 1 -> +, otherwise 11-15 digits -> +digits.
 CREATE OR REPLACE FUNCTION sf.phone_e164(v text) RETURNS text LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE

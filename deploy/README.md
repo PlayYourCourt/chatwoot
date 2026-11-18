@@ -7,8 +7,9 @@ in the repo root are untouched so merges from `chatwoot/chatwoot` stay clean.
 |---|---|
 | `docker-compose.local.yml` | Full stack on your laptop: app, Sidekiq, Postgres (pgvector), Redis, Mailhog |
 | `docker-compose.do.yml` | DigitalOcean Droplet stack: app, Sidekiq, Redis, Caddy (TLS). Postgres is DO Managed, files are on Spaces |
-| `Caddyfile` | Reverse proxy with automatic Let's Encrypt certificates |
-| `.env.local.example` / `.env.do.example` | Environment templates. Copy to `.env.local` / `.env.do` (git-ignored) |
+| `Caddyfile` | Reverse proxy with automatic Let's Encrypt certificates (Chatwoot and n8n) |
+| `n8n/` | SMS sequence engine (n8n workflows, `seq` schema, DB setup), see `n8n/README.md` |
+| `.env.local.example` / `.env.do.example` / `.env.n8n.example` | Environment templates. Copy to `.env.local` / `.env.do` / `.env.n8n` (git-ignored) |
 | `bin/local-setup.sh` | One-time local bootstrap |
 | `bin/droplet-setup.sh` | One-time Droplet bootstrap |
 | `bin/deploy.sh` | Pull the newest image, migrate, restart |
@@ -41,7 +42,7 @@ Provision once:
 2. **Spaces bucket** (e.g. `pyc-chatwoot`, region `nyc3`) and a Spaces access key.
 3. **Droplet** (Ubuntu 24.04, 4 vCPU / 8 GB, 160 GB disk; the disk matters during the import).
    Add the Droplet to the database's trusted sources. Enable weekly Droplet backups.
-4. **DNS**: A record for `crm.playyourcourt.com` → Droplet IP.
+4. **DNS**: A records for `crm.playyourcourt.com` and `automations.playyourcourt.com` → Droplet IP.
 5. **GHCR**: a GitHub personal access token with `read:packages` for the Droplet to pull the image.
 
 Then on the Droplet:
@@ -109,7 +110,9 @@ destination number), so all services share the same two URLs.
 
 ## Klaviyo nurture flows
 
-Klaviyo owns the sequence (steps, delays, splits). Chatwoot sends and records the messages.
+Klaviyo owns the email sequences. SMS sequences run in the n8n engine (`deploy/n8n/README.md`):
+Klaviyo enrolls a lead with one webhook and n8n handles the steps, quiet hours and stop rules. Both
+send through the endpoint below; Chatwoot records the messages.
 
 **Sending a step.** Add a *Webhook* action to the flow:
 
@@ -143,16 +146,6 @@ flow filter *Sale zero times since starting this flow*.
 
 ## Salesforce import
 
-Export Leads/Contacts from Salesforce (Bulk API or Data Loader) to a CSV with headers
-`salesforce_id, first_name, last_name, email, phone, company, sf_account_id, lead_status,
-lead_source, owner`. Then:
-
-```bash
-docker compose -f deploy/docker-compose.do.yml cp contacts.csv rails:/tmp/contacts.csv
-docker compose -f deploy/docker-compose.do.yml exec rails \
-  bundle exec rails "salesforce:import_contacts[<ACCOUNT_ID>,/tmp/contacts.csv]"
-```
-
-The import is idempotent: rows match on Salesforce ID, then email, then phone. Custom attribute
-definitions are created automatically. Cases import (as conversations in an API inbox) is a
-follow-up once the case export format is known.
+The full history import (contacts, cases, emails, SMS, opportunities, Freshdesk-era tickets) runs from the
+weekly export ZIPs through a staging Postgres on the Droplet; see `deploy/salesforce/README.md`, including
+the production run order and what a re-import does and doesn't update.
