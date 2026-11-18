@@ -28,7 +28,7 @@ on:
         default: false
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/chatwoot
+  IMAGE: ghcr.io/playyourcourt/chatwoot   # lowercase: Docker rejects uppercase repository names on pull
 
 permissions:
   contents: read
