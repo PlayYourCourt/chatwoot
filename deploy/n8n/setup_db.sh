@@ -10,7 +10,7 @@
 #
 # Creates: role n8n + database n8n (n8n's own tables), role seq_engine + database seq (engine state, no DELETE
 # on logs), role chatwoot_readonly with SELECT on the Chatwoot tables the Gate reads (CHATWOOT_DB, default
-# chatwoot_production). Passwords are set to the given values on every run.
+# chatwoot_production; CHATWOOT_DB=chatwoot on production). Passwords are set to the given values on every run.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 

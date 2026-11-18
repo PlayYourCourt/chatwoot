@@ -32,14 +32,17 @@ every 5 min: Flow workflow claims due rows ──▶ Gate (Chatwoot DB, read-onl
      PSQL="docker compose -f deploy/docker-compose.local.yml exec -T postgres psql -U postgres" deploy/n8n/setup_db.sh
 
    # production: the managed cluster's admin URL (DO console → Connection details → doadmin)
-   N8N_DB_PASSWORD='…' SEQ_ENGINE_PASSWORD='…' CHATWOOT_READONLY_PASSWORD='…' \
+   CHATWOOT_DB=chatwoot N8N_DB_PASSWORD='…' SEQ_ENGINE_PASSWORD='…' CHATWOOT_READONLY_PASSWORD='…' \
      deploy/n8n/setup_db.sh "postgres://doadmin:…@…ondigitalocean.com:25060/defaultdb?sslmode=require"
    ```
 
-   Single-quote the passwords (bash expands `$word` and `!` otherwise). Re-running only adds what is missing
-   and sets the three passwords to the given values, so it also serves to rotate them.
+   `CHATWOOT_DB` is the Chatwoot database's name (`chatwoot` on production, `chatwoot_production` locally).
+   Single-quote the passwords (bash expands `$word` and `!` otherwise), or avoid the question with
+   `openssl rand -hex 16` values. Re-running only adds what is missing and sets the three passwords to the given
+   values, so it also serves to rotate them.
 2. **`deploy/.env.n8n`** from `deploy/.env.n8n.example`: the `n8n` database values from step 1 and a fresh
    `N8N_ENCRYPTION_KEY` (`openssl rand -hex 32`). Back that key up: it encrypts the stored credentials.
+   Compose expands `$` in env files, so single-quote a password that contains one.
    Production also needs `N8N_HOST=automations.playyourcourt.com` in `deploy/.env.do` (Caddy reads it)
    and a DNS A record for that host.
 3. **Chatwoot**: `rails "salesforce:setup[1]"` (attributes and labels; idempotent). The bot user is tech@:
@@ -53,7 +56,8 @@ every 5 min: Flow workflow claims due rows ──▶ Gate (Chatwoot DB, read-onl
 5. **Credentials** (Credentials → New):
    - *Postgres* `seq`: host `postgres` (local) or the managed cluster host, database `seq`, user `seq_engine`.
      Production: SSL on, "ignore SSL issues" on (DO uses a private CA).
-   - *Postgres* `chatwoot readonly`: same host, database `chatwoot_production`, user `chatwoot_readonly`.
+   - *Postgres* `chatwoot readonly`: same host, the Chatwoot database (`chatwoot` on production,
+     `chatwoot_production` locally), user `chatwoot_readonly`.
    - *Header Auth* `Chatwoot API token`: name `api_access_token`, value = the tech@ token.
    - *SMTP* `Alerts SMTP`: Postmark SMTP (host `smtp.postmarkapp.com`, port 2525, the server token as user and
      password) in production; `mailhog`:1025 with no auth locally.
