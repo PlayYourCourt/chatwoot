@@ -204,137 +204,132 @@ export default {
 </script>
 
 <template>
-  <div class="px-4 py-3">
-    <div class="flex items-center mb-1">
-      <h4 class="flex items-center w-full m-0 text-sm error">
-        <div v-if="isAttributeTypeCheckbox" class="flex items-center">
-          <input
-            v-model="editedValue"
-            class="!my-0 ltr:mr-2 ltr:ml-0 rtl:mr-0 rtl:ml-2"
-            type="checkbox"
-            @change="onUpdate"
-          />
-        </div>
-        <div class="flex items-center justify-between w-full">
-          <span
-            class="w-full inline-flex gap-1.5 items-start font-medium whitespace-nowrap text-sm mb-0"
-            :class="
-              v$.editedValue.$error ? 'text-n-ruby-11' : 'text-n-slate-12'
-            "
-          >
-            {{ label }}
-            <HelperTextPopup
-              v-if="description"
-              :message="description"
-              class="mt-0.5"
+  <div class="flex items-start gap-2 px-3 py-1.5 group">
+    <h4
+      class="flex items-start w-[7.5rem] shrink-0 min-h-6 m-0 text-sm font-medium leading-6 error"
+      :class="v$.editedValue.$error ? 'text-n-ruby-11' : 'text-n-slate-12'"
+    >
+      <span class="inline-flex gap-1.5 items-start min-w-0 break-words">
+        {{ label }}
+        <HelperTextPopup
+          v-if="description"
+          :message="description"
+          class="mt-1.5"
+        />
+      </span>
+    </h4>
+    <div class="flex-1 min-w-0">
+      <div v-if="isAttributeTypeCheckbox" class="flex items-center min-h-6">
+        <input
+          v-model="editedValue"
+          class="!my-0 ltr:mr-2 ltr:ml-0 rtl:mr-0 rtl:ml-2"
+          type="checkbox"
+          @change="onUpdate"
+        />
+      </div>
+      <div v-if="notAttributeTypeCheckboxAndList">
+        <div v-if="isEditing" v-on-clickaway="onClickAway">
+          <div class="flex items-center w-full">
+            <input
+              ref="inputfield"
+              v-model="editedValue"
+              :type="inputType"
+              class="!h-8 ltr:!rounded-r-none rtl:!rounded-l-none !mb-0 !text-sm"
+              autofocus="true"
+              :class="{ error: v$.editedValue.$error }"
+              @blur="v$.editedValue.$touch"
+              @keyup.enter="onUpdate"
             />
+            <div>
+              <NextButton
+                sm
+                icon="i-lucide-check"
+                class="ltr:rounded-l-none rtl:rounded-r-none h-[34px]"
+                @click="onUpdate"
+              />
+            </div>
+          </div>
+          <span
+            v-if="shouldShowErrorMessage"
+            class="block w-full mt-1 text-sm font-normal text-n-ruby-11"
+          >
+            {{ errorMessage }}
           </span>
-          <NextButton
-            v-if="showActions && hasValue"
-            v-tooltip.left="$t('CUSTOM_ATTRIBUTES.ACTIONS.DELETE')"
-            slate
-            sm
-            link
-            icon="i-lucide-trash-2"
-            @click="onDelete"
-          />
         </div>
-      </h4>
-    </div>
-    <div v-if="notAttributeTypeCheckboxAndList">
-      <div v-if="isEditing" v-on-clickaway="onClickAway">
-        <div class="flex items-center w-full mb-2">
-          <input
-            ref="inputfield"
-            v-model="editedValue"
-            :type="inputType"
-            class="!h-8 ltr:!rounded-r-none rtl:!rounded-l-none !mb-0 !text-sm"
-            autofocus="true"
-            :class="{ error: v$.editedValue.$error }"
-            @blur="v$.editedValue.$touch"
-            @keyup.enter="onUpdate"
-          />
-          <div>
+        <div
+          v-show="!isEditing"
+          class="flex items-start min-h-6"
+          :class="{ 'is-editable': showActions }"
+        >
+          <a
+            v-if="isAttributeTypeLink"
+            :href="hrefURL"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="group-hover:bg-n-slate-3 group-hover:dark:bg-n-solid-3 inline-block rounded-sm mb-0 break-all py-0.5 px-1 text-sm leading-5"
+          >
+            {{ urlValue }}
+          </a>
+          <p
+            v-else
+            class="group-hover:bg-n-slate-3 group-hover:dark:bg-n-solid-3 inline-block rounded-sm mb-0 break-all py-0.5 px-1 text-sm leading-5"
+          >
+            {{ displayValue }}
+          </p>
+          <div class="flex items-center gap-1 ml-1 rtl:mr-1 rtl:ml-0 shrink-0">
             <NextButton
-              sm
-              icon="i-lucide-check"
-              class="ltr:rounded-l-none rtl:rounded-r-none h-[34px]"
-              @click="onUpdate"
+              v-if="showActions && hasValue"
+              v-tooltip="$t('CUSTOM_ATTRIBUTES.ACTIONS.COPY')"
+              xs
+              slate
+              ghost
+              icon="i-lucide-clipboard"
+              class="hidden group-hover:flex flex-shrink-0"
+              @click="onCopy"
+            />
+            <NextButton
+              v-if="showActions"
+              v-tooltip.right="$t('CUSTOM_ATTRIBUTES.ACTIONS.EDIT')"
+              xs
+              slate
+              ghost
+              icon="i-lucide-pen"
+              class="hidden group-hover:flex flex-shrink-0"
+              @click="onEdit"
             />
           </div>
         </div>
-        <span
-          v-if="shouldShowErrorMessage"
-          class="block w-full -mt-px text-sm font-normal text-n-ruby-11"
-        >
-          {{ errorMessage }}
-        </span>
       </div>
-      <div
-        v-show="!isEditing"
-        class="flex group"
-        :class="{ 'is-editable': showActions }"
-      >
-        <a
-          v-if="isAttributeTypeLink"
-          :href="hrefURL"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="group-hover:bg-n-slate-3 group-hover:dark:bg-n-solid-3 inline-block rounded-sm mb-0 break-all py-0.5 px-1"
-        >
-          {{ urlValue }}
-        </a>
-        <p
-          v-else
-          class="group-hover:bg-n-slate-3 group-hover:dark:bg-n-solid-3 inline-block rounded-sm mb-0 break-all py-0.5 px-1"
-        >
-          {{ displayValue }}
-        </p>
-        <div
-          class="flex items-center max-w-[2rem] gap-1 ml-1 rtl:mr-1 rtl:ml-0"
-        >
-          <NextButton
-            v-if="showActions && hasValue"
-            v-tooltip="$t('CUSTOM_ATTRIBUTES.ACTIONS.COPY')"
-            xs
-            slate
-            ghost
-            icon="i-lucide-clipboard"
-            class="hidden group-hover:flex flex-shrink-0"
-            @click="onCopy"
-          />
-          <NextButton
-            v-if="showActions"
-            v-tooltip.right="$t('CUSTOM_ATTRIBUTES.ACTIONS.EDIT')"
-            xs
-            slate
-            ghost
-            icon="i-lucide-pen"
-            class="hidden group-hover:flex flex-shrink-0"
-            @click="onEdit"
-          />
-        </div>
+      <div v-if="isAttributeTypeList">
+        <MultiselectDropdown
+          :options="listOptions"
+          :selected-item="selectedItem"
+          :has-thumbnail="false"
+          :multiselector-placeholder="
+            $t('CUSTOM_ATTRIBUTES.FORM.ATTRIBUTE_TYPE.LIST.PLACEHOLDER')
+          "
+          :no-search-result="
+            $t('CUSTOM_ATTRIBUTES.FORM.ATTRIBUTE_TYPE.LIST.NO_RESULT')
+          "
+          :input-placeholder="
+            $t(
+              'CUSTOM_ATTRIBUTES.FORM.ATTRIBUTE_TYPE.LIST.SEARCH_INPUT_PLACEHOLDER'
+            )
+          "
+          @select="onUpdateListValue"
+        />
       </div>
     </div>
-    <div v-if="isAttributeTypeList">
-      <MultiselectDropdown
-        :options="listOptions"
-        :selected-item="selectedItem"
-        :has-thumbnail="false"
-        :multiselector-placeholder="
-          $t('CUSTOM_ATTRIBUTES.FORM.ATTRIBUTE_TYPE.LIST.PLACEHOLDER')
-        "
-        :no-search-result="
-          $t('CUSTOM_ATTRIBUTES.FORM.ATTRIBUTE_TYPE.LIST.NO_RESULT')
-        "
-        :input-placeholder="
-          $t(
-            'CUSTOM_ATTRIBUTES.FORM.ATTRIBUTE_TYPE.LIST.SEARCH_INPUT_PLACEHOLDER'
-          )
-        "
-        @select="onUpdateListValue"
-      />
-    </div>
+    <NextButton
+      v-if="showActions && hasValue"
+      v-tooltip.left="$t('CUSTOM_ATTRIBUTES.ACTIONS.DELETE')"
+      slate
+      xs
+      ghost
+      icon="i-lucide-trash-2"
+      class="shrink-0 opacity-0 group-hover:opacity-100"
+      @click="onDelete"
+    />
   </div>
 </template>
 

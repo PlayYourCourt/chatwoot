@@ -1,7 +1,7 @@
 <script setup>
-import { computed, ref, watch, onMounted } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { useStore, useMapGetter } from 'dashboard/composables/store';
+import { useMapGetter } from 'dashboard/composables/store';
 import { useConversationRoutePath } from 'dashboard/composables/useConversationRoutePath';
 import ConversationCard from 'dashboard/components/widgets/conversation/ConversationCard.vue';
 import ContextMenu from 'dashboard/components/ui/ContextMenu.vue';
@@ -13,7 +13,6 @@ const props = defineProps({
   conversationId: { type: [String, Number], required: true },
 });
 
-const store = useStore();
 const router = useRouter();
 const { buildConversationPath } = useConversationRoutePath();
 
@@ -81,20 +80,16 @@ const closeContextMenu = () => {
   activeContextChat.value = null;
 };
 
+// The conversations are fetched by ContactPanel with the contact, so the count shows while collapsed.
 watch(
   () => props.contactId,
   (newId, oldId) => {
     if (newId && newId !== oldId) {
       showContextMenu.value = false;
       activeContextChat.value = null;
-      store.dispatch('contactConversations/get', newId);
     }
   }
 );
-
-onMounted(() => {
-  store.dispatch('contactConversations/get', props.contactId);
-});
 </script>
 
 <template>

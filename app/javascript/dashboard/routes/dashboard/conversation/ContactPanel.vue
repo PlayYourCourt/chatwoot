@@ -110,9 +110,20 @@ const isListScopedToContact = computed(
     appliedContactFilter.value?.id === contactId.value
 );
 
+const contactConversationGetter = useMapGetter(
+  'contactConversations/getContactConversation'
+);
+const previousConversationsCount = computed(
+  () =>
+    contactConversationGetter
+      .value(contactId.value)
+      .filter(c => c.id !== Number(conversationId.value)).length
+);
+
 const getContactDetails = () => {
   if (contactId.value) {
     store.dispatch('contacts/show', { id: contactId.value });
+    store.dispatch('contactConversations/get', contactId.value);
   }
 };
 
@@ -246,6 +257,14 @@ onMounted(() => {
                 value => toggleSidebarUIState('is_previous_conv_open', value)
               "
             >
+              <template #button>
+                <span
+                  v-if="previousConversationsCount"
+                  class="inline-flex items-center justify-center min-w-5 h-5 px-1.5 me-2 rounded-full bg-n-brand text-white text-xs font-medium"
+                >
+                  {{ previousConversationsCount }}
+                </span>
+              </template>
               <ContactConversations
                 :contact-id="contact.id"
                 :conversation-id="conversationId"
