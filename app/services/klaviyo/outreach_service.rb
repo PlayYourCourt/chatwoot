@@ -3,12 +3,14 @@ class Klaviyo::OutreachService
 
   def perform
     contact = upsert_contact
+    return { contact_id: contact.id } if params[:content].blank? # contact-only upsert, no conversation
+
     contact_inbox = ContactInboxBuilder.new(contact: contact, inbox: inbox).perform
     conversation = active_conversation(contact_inbox) || create_conversation(contact_inbox)
     tag_conversation(conversation)
     message = send_message(conversation)
 
-    { contact_id: contact.id, conversation_id: conversation.id, message_id: message&.id }
+    { contact_id: contact.id, conversation_id: conversation.id, message_id: message.id }
   end
 
   private
@@ -20,6 +22,7 @@ class Klaviyo::OutreachService
   def upsert_contact
     contact = find_contact || account.contacts.new
     fill_blank_attributes(contact)
+    adopt_phone_number(contact)
     contact.custom_attributes = contact.custom_attributes.merge(params[:custom_attributes].to_h) if params[:custom_attributes].present?
     contact.save!
     contact
@@ -32,9 +35,19 @@ class Klaviyo::OutreachService
     end
   end
 
+  # A contact matched by email with another number on file: the number just given is the one to text.
+  # The old one is kept for reference.
+  def adopt_phone_number(contact)
+    return if params[:phone_number].blank? || contact.phone_number == params[:phone_number]
+
+    contact.additional_attributes = contact.additional_attributes.to_h.merge('previous_phone_number' => contact.phone_number)
+    contact.phone_number = params[:phone_number]
+  end
+
+  # Phone first: SMS outreach must reach the number given, even when the email belongs to another contact.
   def find_contact
-    contact = account.contacts.from_email(params[:email]) if params[:email].present?
-    contact ||= account.contacts.find_by(phone_number: params[:phone_number]) if params[:phone_number].present?
+    contact = account.contacts.find_by(phone_number: params[:phone_number]) if params[:phone_number].present?
+    contact ||= account.contacts.from_email(params[:email]) if params[:email].present?
     contact
   end
 
@@ -42,10 +55,10 @@ class Klaviyo::OutreachService
     contact_inbox.conversations.where.not(status: :resolved).order(created_at: :desc).first
   end
 
-  # Snoozed with no snoozed_until means "until the contact replies": automated outreach stays out of
-  # the open queue, and the first incoming message reopens it (Message#reopen_conversation).
+  # Pending keeps automated outreach out of the open queue; an automation rule (message created, incoming,
+  # status pending) opens it when the contact replies. Snoozing stays a manual agent action.
   def create_conversation(contact_inbox)
-    ConversationBuilder.new(params: ActionController::Parameters.new({ status: 'snoozed' }), contact_inbox: contact_inbox).perform
+    ConversationBuilder.new(params: ActionController::Parameters.new({ status: 'pending' }), contact_inbox: contact_inbox).perform
   end
 
   def tag_conversation(conversation)
@@ -56,8 +69,6 @@ class Klaviyo::OutreachService
   end
 
   def send_message(conversation)
-    return if params[:content].blank?
-
     Messages::MessageBuilder.new(user, conversation, { content: params[:content], message_type: 'outgoing' }).perform
   end
 end
