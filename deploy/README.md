@@ -66,10 +66,14 @@ Open `https://crm.playyourcourt.com` and complete onboarding.
   (pull, `db:migrate`, `up -d`). The exact build is pinned in `deploy/.env` on the Droplet.
 - **Rollback**: Actions → the workflow → "Run workflow" from the previous good commit with *deploy* ticked,
   or on the Droplet `deploy/bin/deploy.sh ghcr.io/playyourcourt/chatwoot:<old sha>`.
-- **Secrets** (repository → Settings → Secrets): `DROPLET_HOST`, `DROPLET_USER`, `DROPLET_SSH_KEY`
-  (a deploy-only key whose public half is in the Droplet user's `authorized_keys`), `DROPLET_APP_DIR`
-  (the checkout path, e.g. `/opt/chatwoot`). Create a `production` environment in the repo so deploys
-  show up in the Deployments tab and can require a reviewer later.
+- **Runner**: the deploy job runs on a self-hosted GitHub runner installed on the Droplet (labels
+  `self-hosted`, `droplet`), so no inbound SSH is needed and port 22 can stay closed to the internet (an open
+  port 22 gets flooded by scanners and sshd drops connections). One-time install, as the user that owns the
+  checkout and can run Docker: repository → Settings → Actions → Runners → New self-hosted runner → Linux, run
+  the shown download/config commands with `--labels droplet --unattended`, then `sudo ./svc.sh install && sudo
+  ./svc.sh start`. Set `DROPLET_APP_DIR=<checkout path>` in the runner's `.env` file if it is not `/opt/chatwoot`.
+  Create a `production` environment in the repo so deploys show up in the Deployments tab and can require a
+  reviewer later.
 - **Upstream updates**: `git fetch upstream && git checkout develop && git merge upstream/develop`,
   resolve, run the local stack, then merge `develop` into `main`.
 

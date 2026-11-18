@@ -88,22 +88,18 @@ jobs:
   deploy:
     needs: build
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.deploy)
-    runs-on: ubuntu-latest
+    # A self-hosted runner installed on the Droplet (deploy/README.md "Deploying"): it polls GitHub, so the
+    # Droplet needs no inbound SSH from the internet.
+    runs-on: [self-hosted, droplet]
     environment: production
     concurrency:
       group: production-deploy
       cancel-in-progress: false
     steps:
-      - name: Deploy ${{ needs.build.outputs.sha_tag }} to the Droplet
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DROPLET_HOST }}
-          username: ${{ secrets.DROPLET_USER }}
-          key: ${{ secrets.DROPLET_SSH_KEY }}
-          command_timeout: 30m
-          script: |
-            set -euo pipefail
-            cd "${{ secrets.DROPLET_APP_DIR }}"
-            git fetch --quiet origin main
-            git checkout --quiet --force "${{ github.sha }}"
-            deploy/bin/deploy.sh "${{ env.IMAGE }}:${{ needs.build.outputs.sha_tag }}"
+      - name: Deploy ${{ needs.build.outputs.sha_tag }} on the Droplet
+        run: |
+          set -euo pipefail
+          cd "${DROPLET_APP_DIR:-/opt/chatwoot}"
+          git fetch --quiet origin main
+          git checkout --quiet --force "${{ github.sha }}"
+          deploy/bin/deploy.sh "${{ env.IMAGE }}:${{ needs.build.outputs.sha_tag }}"
