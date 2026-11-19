@@ -320,6 +320,15 @@
         "url": "=http://rails:3000/api/v1/accounts/1/conversations/{{ $('Gate').item.json.conversation_id }}/messages",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            }
+          ]
+        },
         "options": {
           "timeout": 30000
         },

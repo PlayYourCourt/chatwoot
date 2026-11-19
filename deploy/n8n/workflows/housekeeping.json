@@ -169,6 +169,15 @@
         "url": "=http://rails:3000/api/v1/accounts/1/contacts/{{ $json.contact_id }}/labels",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            }
+          ]
+        },
         "options": {
           "timeout": 30000
         }
@@ -209,6 +218,15 @@
         "url": "=http://rails:3000/api/v1/accounts/1/contacts/{{ $json.contact_id }}/labels",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            }
+          ]
+        },
         "options": {
           "timeout": 30000
         },
@@ -239,6 +257,15 @@
         "url": "=http://rails:3000/api/v1/accounts/1/contacts/{{ $('Mirror').item.json.contact_id }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            }
+          ]
+        },
         "options": {
           "timeout": 30000
         },
@@ -364,6 +391,15 @@
         "url": "=http://rails:3000/api/v1/accounts/1/conversations/{{ $json.conversation_id }}/messages",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Forwarded-Proto",
+              "value": "https"
+            }
+          ]
+        },
         "options": {
           "timeout": 30000
         },

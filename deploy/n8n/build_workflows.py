@@ -106,8 +106,11 @@ API = f'{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}'
 
 
 def http(name, method, url, pos, body_expr=None):
-    """Chatwoot API call with the tech@ token; errors come out as items with an `error` field, never retried."""
+    """Chatwoot API call with the tech@ token; errors come out as items with an `error` field, never retried.
+    X-Forwarded-Proto: the call goes over the compose network as plain HTTP, and production Rails (FORCE_SSL)
+    would otherwise redirect it to https://rails:3000, a TLS handshake against a plaintext port."""
     params = {'method': method, 'url': url, 'authentication': 'genericCredentialType', 'genericAuthType': 'httpHeaderAuth',
+              'sendHeaders': True, 'headerParameters': {'parameters': [{'name': 'X-Forwarded-Proto', 'value': 'https'}]},
               'options': {'timeout': 30000}}
     if body_expr:
         params.update({'sendBody': True, 'specifyBody': 'json', 'jsonBody': body_expr})
