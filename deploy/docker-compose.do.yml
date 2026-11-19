@@ -46,7 +46,7 @@ services:
       - n8n_data:/home/node/.n8n
 
   caddy:
-    image: caddy:2
+    image: caddy:2.11.9   # pinned: 2.11.4 changed header handling (see Caddyfile); bump deliberately
     restart: unless-stopped
     depends_on:
       - rails
