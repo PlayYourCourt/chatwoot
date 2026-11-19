@@ -15,6 +15,7 @@ Chatwoot rails + sidekiq ◀── SALESFORCE_STAGING_DATABASE_URL ──┘   r
 
 - Docker. The staging DB is a throwaway `postgres:16` container (`docker-compose.staging.yml`) on the
   Chatwoot compose network, reachable from rails/sidekiq as `sf-staging`.
+- `unzip` on the host (`apt-get install unzip` on the Droplet); the loader reads the export ZIPs with it.
 - ~40 GB free disk for the full export (2.7 GB ZIPs, ~15 GB staging DB, Chatwoot DB growth ~10 GB).
 - `SALESFORCE_STAGING_DATABASE_URL=postgres://sf:sf@sf-staging:5432/sf` in the Chatwoot env file, and
   the rails/sidekiq containers restarted so they pick it up.
