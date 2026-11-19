@@ -2,17 +2,20 @@
 # deploy/salesforce/ (sf.people, sf.threads, sf.parts). `source_metadata` carries the run scope:
 #   phase: 'salesforce' (cases, leads, opportunities, SMS, email) or 'freshdesk' (legacy tickets)
 #   since: optional ISO date; only threads active on/after it, and the people they touch
+#   shards: how many page chains run in parallel (rows are split by `seq % shards`)
 class DataImports::Salesforce::Source
   PROVIDER = 'salesforce'.freeze
   DISPLAY_NAME = 'Salesforce'.freeze
   CONTACTS_PER_PAGE = 200
   CONVERSATIONS_PER_PAGE = 50
+  DEFAULT_SHARDS = 6
+  MAX_SHARDS = 16
   PHASES = %w[salesforce freshdesk].freeze
   ALREADY_IMPORTED_ERROR_CODE = 'salesforce_already_imported'.freeze
   SKIPPED_MESSAGE_ERROR_CODE = 'salesforce_blank_message'.freeze
   TRUNCATED_PARTS_ERROR_CODE = 'salesforce_truncated_parts'.freeze
 
-  attr_reader :provider, :display_name, :contacts_per_page, :conversations_per_page, :phase, :since
+  attr_reader :provider, :display_name, :contacts_per_page, :conversations_per_page, :phase, :since, :shards
 
   # Re-apply Salesforce state (conversation status, owner, team, priority, labels; contact attributes) to records
   # an earlier import created. For re-imports made while Salesforce is still the system of record.
@@ -27,7 +30,7 @@ class DataImports::Salesforce::Source
   def self.source_metadata(source_params)
     params = source_params.to_h.with_indifferent_access
     { 'phase' => params[:phase].presence || 'salesforce', 'since' => params[:since].presence,
-      'refresh' => (true if params[:refresh].present?) }.compact
+      'refresh' => (true if params[:refresh].present?), 'shards' => params[:shards].presence&.to_i }.compact
   end
 
   def self.default_import_name
@@ -71,22 +74,25 @@ class DataImports::Salesforce::Source
     @phase = PHASES.include?(metadata[:phase]) ? metadata[:phase] : 'salesforce'
     @since = metadata[:since].present? ? Time.zone.parse(metadata[:since].to_s) : nil
     @refresh = metadata[:refresh] == true
+    @shards = (metadata[:shards].presence || DEFAULT_SHARDS).to_i.clamp(1, MAX_SHARDS)
     @normalizer = DataImports::Salesforce::Normalizer.new
   end
 
-  def list_contacts(starting_after:, per_page:)
-    scope = people_scope
+  # `shard` selects the rows whose `seq % shards` equals it, so parallel chains never overlap. The totals are
+  # set when the import is created; a shard page reports none.
+  def list_contacts(starting_after:, per_page:, shard: nil)
+    scope = sharded(people_scope, shard)
     page = scope.where('seq > ?', starting_after.to_i).order(:seq).limit(per_page).to_a
     response = paginated(page.map { |person| @normalizer.contact(person) }, page.last&.seq, per_page)
-    response['total_count'] = scope.count if starting_after.blank?
+    response['total_count'] = scope.count if starting_after.blank? && shard.nil?
     response
   end
 
-  def list_conversations(starting_after:, per_page:)
-    scope = threads_scope
+  def list_conversations(starting_after:, per_page:, shard: nil)
+    scope = sharded(threads_scope, shard)
     page = scope.where('seq > ?', starting_after.to_i).order(:seq).limit(per_page).to_a
     response = paginated(page.map { |thread| @normalizer.conversation_summary(thread) }, page.last&.seq, per_page)
-    response['total_count'] = scope.count if starting_after.blank?
+    response['total_count'] = scope.count if starting_after.blank? && shard.nil?
     response
   end
 
@@ -185,6 +191,10 @@ class DataImports::Salesforce::Source
   end
 
   private
+
+  def sharded(scope, shard)
+    shard.nil? ? scope : scope.where('seq % ? = ?', @shards, shard)
+  end
 
   def people_scope
     DataImports::Salesforce::Staging::Person.in_scope(@phase, @since)

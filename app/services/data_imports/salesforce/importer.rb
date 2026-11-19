@@ -4,12 +4,157 @@
 #   inbound mail or SMS lands on the same contact_inbox (placeholders keep the synthetic id);
 # - imported conversations get their labels, status (snoozed until a future due date), priority, owner and team;
 # - messages carry the SMS delivery status and, for emails, the subject/from/to in content_attributes.
+# - the contact and conversation stages run as `shards` parallel page chains (rows split by `seq % shards`),
+#   each with its own cursor key (`contacts/0` ...). The stage key (`contacts`) is marked completed by whichever
+#   chain finishes last. Stats are flushed once per page as deltas merged under the import's row lock, and the
+#   per-item stop check is throttled, because every round trip to the database is what bounds the throughput.
 class DataImports::Salesforce::Importer < DataImports::Importer
   SMS_STATUSES = { 'delivered' => 'delivered', 'read' => 'read', 'sent' => 'sent' }.freeze
   # Salesforce object => Chatwoot team name; the teams must exist before the import.
   OBJECT_TEAMS = { 'opportunity' => 'lesson sales', 'case' => 'support' }.freeze
+  STOP_CHECK_INTERVAL = 10.seconds
+  COUNTER_STATS = { 'contacts' => %w[imported skipped], 'conversations' => %w[imported skipped],
+                    'messages' => %w[imported skipped total], 'errors' => %w[count] }.freeze
+
+  def shards
+    @source.shards
+  end
+
+  def shard_keys(stage)
+    Array.new(shards) { |shard| "#{stage}/#{shard}" }
+  end
+
+  def shard_completed?(stage, shard)
+    stage_completed?("#{stage}/#{shard}")
+  end
+
+  def import_contacts_page(starting_after: nil, shard: 0)
+    response = @source.list_contacts(starting_after: starting_after, per_page: @source.contacts_per_page, shard: shard)
+    import_shard_page("contacts/#{shard}", response) { |contact| import_contact(contact) }
+  end
+
+  def import_conversations_page(starting_after: nil, shard: 0)
+    response = @source.list_conversations(starting_after: starting_after, per_page: @source.conversations_per_page, shard: shard)
+    import_shard_page("conversations/#{shard}", response) { |summary| import_conversation_from_summary(summary) }
+  end
+
+  # Enqueues one page chain per shard for the stage that is not done yet (on start and when resuming).
+  def enqueue_stage(run_id)
+    if import_contacts? && !contacts_completed?
+      enqueue_shards(DataImports::Salesforce::ContactsPageJob, 'contacts', run_id)
+    elsif import_conversations? && !conversations_completed?
+      enqueue_shards(DataImports::Salesforce::ConversationsPageJob, 'conversations', run_id)
+    else
+      finish!
+    end
+  end
+
+  # Called by a chain that reached the end of its shard: the last one marks the stage completed and moves on.
+  def shard_finished(stage, run_id)
+    advanced = @data_import.with_lock do
+      next false if inactive_import_run?
+
+      cursor = @data_import.cursor.to_h.deep_stringify_keys
+      next false if cursor.dig(stage, 'completed') == true
+      next false unless shard_keys(stage).all? { |key| cursor.dig(key, 'completed') == true }
+
+      @data_import.update!(cursor: cursor.merge(stage => { 'completed' => true, 'updated_at' => Time.current.iso8601 }))
+      true
+    end
+    enqueue_stage(run_id) if advanced
+  end
+
+  # The generic finish! writes the in-memory stats; with several chains they are only deltas, so count first.
+  def finish!
+    @data_import.with_lock do
+      next if inactive_import_run?
+
+      @stats = default_stats.deep_merge(@data_import.stats || {})
+      items = @data_import.items.where(source_provider: @source.provider)
+      %w[contact conversation].each do |type|
+        @stats["#{type}s"]['imported'] = items.where(source_object_type: type).imported.count
+        @stats["#{type}s"]['skipped'] = items.where(source_object_type: type).skipped.count
+      end
+      mappings = @data_import.mappings.where(source_provider: @source.provider, source_object_type: 'message')
+      @stats['messages']['imported'] = mappings.count - mappings.where("metadata ->> 'skipped' = ?", 'true').count
+      @stats['messages']['skipped'] = @data_import.import_errors.where(source_object_type: 'message').where("details ->> 'kind' = ?", 'skipped').count
+    end
+    super
+  end
 
   private
+
+  def enqueue_shards(job_class, stage, run_id)
+    shards.times do |shard|
+      next if stage_completed?("#{stage}/#{shard}")
+
+      job_class.perform_later(@data_import, cursor_for("#{stage}/#{shard}"), run_id, shard)
+    end
+  end
+
+  def import_shard_page(key, response)
+    @defer_stats = true
+    Array(response['data']).each do |record|
+      break if import_stopped?
+
+      yield record
+    end
+    @defer_stats = false
+    return PageResult.new(next_cursor: nil) if import_stopped?
+
+    persist_stats
+    PageResult.new(next_cursor: update_cursor(key, response.dig('pages', 'next', 'starting_after')))
+  end
+
+  def import_stopped?
+    return true if @import_stopped
+    return false if @stop_checked_at && @stop_checked_at > STOP_CHECK_INTERVAL.ago
+
+    @stop_checked_at = Time.current
+    super
+  end
+
+  # Each chain only ever writes its own key, so there is no concurrent-writer check per key.
+  def update_cursor(key, cursor)
+    @data_import.with_lock do
+      current_cursor = @data_import.cursor.to_h.deep_stringify_keys
+      if inactive_import_run?
+        @import_stopped = true
+        next current_cursor.dig(key, 'starting_after')
+      end
+
+      updated_cursor = current_cursor.merge(
+        key => { 'starting_after' => cursor, 'completed' => cursor.blank?, 'updated_at' => Time.current.iso8601 }
+      )
+      @data_import.update!(cursor: updated_cursor)
+      @persisted_cursor = updated_cursor.deep_dup
+      cursor
+    end
+  end
+
+  # Counters are increments since the last flush, added to whatever the other chains have stored meanwhile.
+  def persist_stats
+    return if @defer_stats
+
+    @data_import.with_lock do
+      stored = default_stats.deep_merge(@data_import.stats || {})
+      base = @persisted_stats || stored
+      COUNTER_STATS.each do |group, keys|
+        keys.each do |stat|
+          delta = @stats.dig(group, stat).to_i - base.dig(group, stat).to_i
+          stored[group][stat] = stored[group][stat].to_i + delta unless delta.zero? && stored[group][stat].nil?
+        end
+      end
+      @stats = stored
+      @data_import.update_columns(stats: @stats, updated_at: Time.current)
+      @persisted_stats = @stats.deep_dup
+    end
+  end
+
+  # Absolute counts are reconciled once at the end (finish!) instead of per page.
+  def reconcile_dirty_stats; end
+  def reconcile_item_stats(_source_object_type); end
+  def reconcile_message_stats; end
 
   def contact_inbox_for(contact, inbox)
     source_id = live_source_id(contact, inbox) || "salesforce:#{contact.id}"

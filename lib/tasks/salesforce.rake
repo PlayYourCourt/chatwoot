@@ -13,9 +13,9 @@ namespace :salesforce do
     puts "Account #{account.id}: #{DataImports::Salesforce::Setup.new(account: account).perform}"
   end
 
-  desc 'Start a Salesforce import from the staging DB. Usage: rails "salesforce:import[ACCOUNT_ID,salesforce|freshdesk,2026-08-10,refresh]" ' \
-       '(refresh: re-apply Salesforce state to records an earlier import created)'
-  task :import, [:account_id, :phase, :since, :refresh] => :environment do |_task, args|
+  desc 'Start a Salesforce import from the staging DB. Usage: rails "salesforce:import[ACCOUNT_ID,salesforce|freshdesk,2026-08-10,refresh,6]" ' \
+       '(refresh: re-apply Salesforce state to records an earlier import created; last argument: parallel chains, default 6)'
+  task :import, [:account_id, :phase, :since, :refresh, :shards] => :environment do |_task, args|
     account = Account.find(args[:account_id])
     initiated_by = account.administrators.first
     phase = args[:phase].presence || 'salesforce'
@@ -29,13 +29,35 @@ namespace :salesforce do
         phase: phase,
         since: args[:since].presence,
         refresh: args[:refresh].presence,
+        shards: args[:shards].presence,
         import_types: DataImport::IMPORT_TYPES
       }
     ).perform
     abort 'Another data import is already in progress for this account.' unless data_import
 
     DataImports::Salesforce::ImportJob.perform_later(data_import, data_import.active_import_run_id)
-    puts "Started DataImport ##{data_import.id} (#{data_import.name}); totals: #{data_import.stats}"
+    puts "Started DataImport ##{data_import.id} (#{data_import.name}, #{data_import.source_metadata['shards'] || DataImports::Salesforce::Source::DEFAULT_SHARDS} chains); " \
+         "totals: #{data_import.stats}"
+  end
+
+  desc 'Re-enqueue the page chains of the running Salesforce import (after a lost Sidekiq job). Usage: rails "salesforce:resume[ACCOUNT_ID]"'
+  task :resume, [:account_id] => :environment do |_task, args|
+    account = Account.find(args[:account_id])
+    data_import = account.data_imports.where(source_provider: 'salesforce', status: [:pending, :processing]).order(:id).last
+    abort 'No Salesforce import is in progress for this account.' unless data_import
+
+    DataImports::Salesforce::ImportJob.perform_later(data_import, data_import.active_import_run_id)
+    puts "Resumed DataImport ##{data_import.id} (#{data_import.name}); cursor: #{data_import.cursor}"
+  end
+
+  desc 'Abandon the running Salesforce import so a new one can start. Usage: rails "salesforce:abandon[ACCOUNT_ID]"'
+  task :abandon, [:account_id] => :environment do |_task, args|
+    account = Account.find(args[:account_id])
+    data_import = account.data_imports.where(source_provider: 'salesforce', status: [:pending, :processing]).order(:id).last
+    abort 'No Salesforce import is in progress for this account.' unless data_import
+
+    data_import.abandon!
+    puts "DataImport ##{data_import.id} (#{data_import.name}) status=#{data_import.status}"
   end
 
   desc 'Move imported history from a placeholder inbox into a real inbox. Usage: rails "salesforce:relocate_inbox[FROM_INBOX_ID,TO_INBOX_ID]"'

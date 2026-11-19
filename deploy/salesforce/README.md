@@ -107,6 +107,13 @@ $R "salesforce:report[1]"                     # progress; also Settings → Data
 $R "salesforce:import[1,freshdesk]"           # second pass once the first reports complete
 ```
 
+The import runs as parallel page chains (6 by default; the fifth argument sets it, e.g.
+`salesforce:import[1,salesforce,,,8]`): rows are split by `seq % chains`, each chain keeps its own cursor and the last
+one to finish a stage starts the next. Against the managed database a single chain manages ~10 contacts/s, so the
+chains are what make the 720k contacts fit in hours rather than days. If the report stops moving while the status
+is still `processing` (a Sidekiq restart can drop a chain), `salesforce:resume[1]` re-enqueues the unfinished chains;
+`salesforce:abandon[1]` stops an import so a new one can start.
+
 Afterwards, `salesforce:relocate_inbox[<placeholder>,<twilio inbox>]` for each number that now has a real Twilio
 inbox, then stop the staging container (`docker compose -f deploy/salesforce/docker-compose.staging.yml down`;
 keep the volume, or `pg_dump` it to Spaces as the archive).
