@@ -181,8 +181,7 @@ class DataImports::Importer
     contact = import_contact(contact_payloads.first, required_for_conversation: true)
     contact_payloads.drop(1).each { |contact_payload| import_contact(contact_payload) }
     source_type = conversation_source_type(conversation, conversation_summary)
-    inbox = @placeholder_inboxes.inbox_for(source_type)
-    contact_inbox = contact_inbox_for(contact, inbox)
+    inbox, contact_inbox = conversation_inbox_for(contact, source_type)
 
     mapped_conversation = mapping&.chatwoot_record
     if mapped_conversation && mapping.data_import_id != @data_import.id
@@ -811,6 +810,11 @@ class DataImports::Importer
     return if latest_message.blank?
 
     conversation.update_columns(last_activity_at: latest_message.created_at, updated_at: Time.current)
+  end
+
+  def conversation_inbox_for(contact, source_type)
+    inbox = @placeholder_inboxes.inbox_for(source_type)
+    [inbox, contact_inbox_for(contact, inbox)]
   end
 
   def contact_inbox_for(contact, inbox)

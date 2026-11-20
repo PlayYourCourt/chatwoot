@@ -8,6 +8,10 @@ class DataImports::PlaceholderInboxBuilder
   end
 
   def inbox_for(source_type)
+    placeholder_inbox_for(source_type)
+  end
+
+  def placeholder_inbox_for(source_type)
     bucket = @source_bucket.for(source_type)
     placeholder_inboxes[bucket[:key]] ||= find_or_create_placeholder_inbox(bucket)
   end

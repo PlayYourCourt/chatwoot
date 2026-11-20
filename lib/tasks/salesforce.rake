@@ -105,11 +105,13 @@ namespace :salesforce do
       end
     end
     puts 'Conversations per inbox:'
+    imported_by_inbox = account.conversations.where("identifier LIKE 'salesforce:%'").group(:inbox_id).count
+    total_by_inbox = account.conversations.group(:inbox_id).count
     account.inboxes.order(:id).each do |inbox|
-      imported = inbox.conversations.where("identifier LIKE 'salesforce:%'").count
-      puts "  ##{inbox.id} #{inbox.name}: #{imported} imported / #{inbox.conversations.count} total"
+      puts "  ##{inbox.id} #{inbox.name}: #{imported_by_inbox[inbox.id].to_i} imported / #{total_by_inbox[inbox.id].to_i} total"
     end
-    puts "Imported contacts: #{account.contacts.where("additional_attributes->'source'->>'provider' = 'salesforce'").count}"
+    contacts = DataImportMapping.where(account_id: account.id, source_provider: 'salesforce', source_object_type: 'contact').count
+    puts "Imported contacts: #{contacts}"
   end
 end
 # rubocop:enable Metrics/BlockLength

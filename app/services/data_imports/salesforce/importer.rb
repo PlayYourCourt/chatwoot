@@ -64,21 +64,10 @@ class DataImports::Salesforce::Importer < DataImports::Importer
     enqueue_stage(run_id) if advanced
   end
 
-  # The generic finish! writes the in-memory stats; with several chains they are only deltas, so count first.
+  # The generic finish! writes the in-memory stats; with several chains those are the stored sums of every chain's
+  # deltas (a page retried after a timeout can count a skip twice, nothing more), so load them first.
   def finish!
-    @data_import.with_lock do
-      next if inactive_import_run?
-
-      @stats = default_stats.deep_merge(@data_import.stats || {})
-      items = @data_import.items.where(source_provider: @source.provider)
-      %w[contact conversation].each do |type|
-        @stats["#{type}s"]['imported'] = items.where(source_object_type: type).imported.count
-        @stats["#{type}s"]['skipped'] = items.where(source_object_type: type).skipped.count
-      end
-      mappings = @data_import.mappings.where(source_provider: @source.provider, source_object_type: 'message')
-      @stats['messages']['imported'] = mappings.count - mappings.where("metadata ->> 'skipped' = ?", 'true').count
-      @stats['messages']['skipped'] = @data_import.import_errors.where(source_object_type: 'message').where("details ->> 'kind' = ?", 'skipped').count
-    end
+    @stats = default_stats.deep_merge(@data_import.reload.stats || {})
     super
   end
 
@@ -151,7 +140,8 @@ class DataImports::Salesforce::Importer < DataImports::Importer
     end
   end
 
-  # Absolute counts are reconciled once at the end (finish!) instead of per page.
+  # No absolute recounts: on a million items they outlast the statement timeout, and the summed deltas are exact
+  # to within a few.
   def reconcile_dirty_stats; end
   def reconcile_item_stats(_source_object_type); end
   def reconcile_message_stats; end
@@ -183,6 +173,18 @@ class DataImports::Salesforce::Importer < DataImports::Importer
     end
   rescue ActiveRecord::ActiveRecordError => e
     fail_message(conversation, entry.source_id, entry.part, e)
+  end
+
+  # A contact without a usable number (blanked as a shared placeholder number, or already linked to another contact)
+  # cannot be linked to a live Twilio inbox; its threads keep their history in the bucket's placeholder inbox.
+  def conversation_inbox_for(contact, source_type)
+    inbox = @placeholder_inboxes.inbox_for(source_type)
+    [inbox, contact_inbox_for(contact, inbox)]
+  rescue ActiveRecord::RecordInvalid
+    raise unless inbox.channel_type == 'Channel::TwilioSms'
+
+    placeholder = @placeholder_inboxes.placeholder_inbox_for(source_type)
+    [placeholder, contact_inbox_for(contact, placeholder)]
   end
 
   def contact_inbox_for(contact, inbox)

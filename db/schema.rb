@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_10_19_143116) do
+ActiveRecord::Schema[7.1].define(version: 2026_11_20_135339) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1235,6 +1235,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_19_143116) do
     t.datetime "updated_at", null: false
     t.index ["chatwoot_record_type", "chatwoot_record_id"], name: "idx_data_import_items_on_record"
     t.index ["data_import_id", "source_object_type", "source_object_id"], name: "idx_data_import_items_on_import_and_source", unique: true
+    t.index ["data_import_id", "source_object_type", "status"], name: "idx_data_import_items_on_import_type_and_status"
     t.index ["data_import_id"], name: "index_data_import_items_on_data_import_id"
     t.index ["source_provider", "source_object_type", "source_object_id"], name: "idx_data_import_items_on_source"
   end

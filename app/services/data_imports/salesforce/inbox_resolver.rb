@@ -9,7 +9,7 @@ class DataImports::Salesforce::InboxResolver < DataImports::PlaceholderInboxBuil
   end
 
   def inbox_for(source_type)
-    live_inbox_for(source_type) || super
+    live_inbox_for(source_type) || placeholder_inbox_for(source_type)
   end
 
   private
