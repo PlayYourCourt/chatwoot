@@ -111,10 +111,13 @@ The import runs as parallel page chains (6 by default; the fifth argument sets i
 `salesforce:import[1,salesforce,,,8]`): rows are split by `seq % chains`, each chain keeps its own cursor and the last
 one to finish a stage starts the next. Against the managed database a single chain manages ~10 contacts/s, so the
 chains are what make the 720k contacts fit in hours rather than days. If the report stops moving while the status
-is still `processing` (a Sidekiq restart can drop a chain), `salesforce:resume[1]` re-enqueues the unfinished chains;
-`salesforce:abandon[1]` stops an import so a new one can start.
+is still `processing` (a Sidekiq restart can drop a chain), or the status is `failed`, `salesforce:resume[1]` re-enqueues
+the unfinished chains; `salesforce:abandon[1]` stops an import so a new one can start. A statement timeout on a page
+re-runs that page a few seconds later rather than failing the import.
 
-Afterwards, `salesforce:relocate_inbox[<placeholder>,<twilio inbox>]` for each number that now has a real Twilio
+Afterwards, `salesforce:merge_placeholders[1]` folds any duplicate placeholder inboxes (chains that met a new bucket
+at the same moment, before the account lock in `PlaceholderInboxBuilder` existed) into the oldest one, then
+`salesforce:relocate_inbox[<placeholder>,<twilio inbox>]` for each number that now has a real Twilio
 inbox, then stop the staging container (`docker compose -f deploy/salesforce/docker-compose.staging.yml down`;
 keep the volume, or `pg_dump` it to Spaces as the archive).
 
@@ -128,6 +131,9 @@ Load and transform the new export over the old staging data (the loader truncate
 | Contact | **left as is**: name, email, phone, custom attributes, type are not touched | created |
 | Conversation | **left as is**: status, owner, team, priority, labels are not touched | created with its state |
 | Message | skipped | appended to its conversation, even an existing one |
+
+Items that failed in an earlier import (`salesforce:report` lists them) are walked again by the next import even
+when `since` would leave them out; their Salesforce ids travel in the import's `source_metadata`.
 
 So by default a lead whose Salesforce status changed since the last import keeps the status it has in Chatwoot,
 which is what you want once agents work in Chatwoot (the import must not undo their changes).

@@ -19,6 +19,7 @@ namespace :salesforce do
     account = Account.find(args[:account_id])
     initiated_by = account.administrators.first
     phase = args[:phase].presence || 'salesforce'
+    failed_items = DataImportItem.where(data_import: account.data_imports.where(source_provider: 'salesforce'), status: :failed)
     data_import = DataImports::CreationService.new(
       account: account,
       initiated_by: initiated_by,
@@ -30,22 +31,28 @@ namespace :salesforce do
         since: args[:since].presence,
         refresh: args[:refresh].presence,
         shards: args[:shards].presence,
+        retry_person_keys: failed_items.where(source_object_type: 'contact').distinct.pluck(:source_object_id),
+        retry_thread_keys: failed_items.where(source_object_type: 'conversation').distinct.pluck(:source_object_id),
         import_types: DataImport::IMPORT_TYPES
       }
     ).perform
     abort 'Another data import is already in progress for this account.' unless data_import
 
     DataImports::Salesforce::ImportJob.perform_later(data_import, data_import.active_import_run_id)
-    puts "Started DataImport ##{data_import.id} (#{data_import.name}, #{data_import.source_metadata['shards'] || DataImports::Salesforce::Source::DEFAULT_SHARDS} chains); " \
+    metadata = data_import.source_metadata
+    puts "Started DataImport ##{data_import.id} (#{data_import.name}, #{metadata['shards'] || DataImports::Salesforce::Source::DEFAULT_SHARDS} chains, " \
+         "retrying #{Array(metadata['retry_person_keys']).size} contacts / #{Array(metadata['retry_thread_keys']).size} conversations " \
+         'that failed earlier); ' \
          "totals: #{data_import.stats}"
   end
 
-  desc 'Re-enqueue the page chains of the running Salesforce import (after a lost Sidekiq job). Usage: rails "salesforce:resume[ACCOUNT_ID]"'
+  desc 'Re-enqueue the page chains of the latest unfinished (or failed) Salesforce import. Usage: rails "salesforce:resume[ACCOUNT_ID]"'
   task :resume, [:account_id] => :environment do |_task, args|
     account = Account.find(args[:account_id])
-    data_import = account.data_imports.where(source_provider: 'salesforce', status: [:pending, :processing]).order(:id).last
-    abort 'No Salesforce import is in progress for this account.' unless data_import
+    data_import = account.data_imports.where(source_provider: 'salesforce', status: [:pending, :processing, :failed]).order(:id).last
+    abort 'No Salesforce import to resume for this account.' unless data_import
 
+    data_import.update!(status: :processing) if data_import.failed?
     DataImports::Salesforce::ImportJob.perform_later(data_import, data_import.active_import_run_id)
     puts "Resumed DataImport ##{data_import.id} (#{data_import.name}); cursor: #{data_import.cursor}"
   end
@@ -64,31 +71,25 @@ namespace :salesforce do
   task :relocate_inbox, [:from_inbox_id, :to_inbox_id] => :environment do |_task, args|
     from = Inbox.find(args[:from_inbox_id])
     to = Inbox.find(args[:to_inbox_id])
-    abort 'Both inboxes must belong to the same account.' unless from.account_id == to.account_id
+    result = DataImports::Salesforce::InboxRelocator.new(from: from, to: to).perform
+    puts "Moved #{result.conversations} conversations, #{result.messages} messages, #{result.contact_inboxes} contact inboxes " \
+         "from ##{from.id} to ##{to.id}"
+    puts "Deleted placeholder inbox ##{from.id} (#{from.name})" if result.deleted_placeholder
+  end
 
-    moved_contact_inboxes = 0
-    ContactInbox.where(inbox_id: from.id).find_each do |contact_inbox|
-      source_id = case to.channel_type
-                  when 'Channel::Email' then contact_inbox.contact.email.presence
-                  when 'Channel::TwilioSms' then contact_inbox.contact.phone_number.presence
-                  end || contact_inbox.source_id
-      existing = ContactInbox.find_by(inbox_id: to.id, source_id: source_id)
-      if existing && existing.contact_id == contact_inbox.contact_id
-        Conversation.where(contact_inbox_id: contact_inbox.id).update_all(contact_inbox_id: existing.id) # rubocop:disable Rails/SkipsModelValidations
-        contact_inbox.delete
-      elsif existing
-        contact_inbox.update_columns(inbox_id: to.id) # rubocop:disable Rails/SkipsModelValidations
-      else
-        contact_inbox.update_columns(inbox_id: to.id, source_id: source_id) # rubocop:disable Rails/SkipsModelValidations
-      end
-      moved_contact_inboxes += 1
+  desc 'Fold duplicate Salesforce placeholder inboxes (same bucket) into the oldest one. Usage: rails "salesforce:merge_placeholders[ACCOUNT_ID]"'
+  task :merge_placeholders, [:account_id] => :environment do |_task, args|
+    account = Account.find(args[:account_id])
+    placeholders = account.inboxes.includes(:channel).where(channel_type: 'Channel::Api').order(:id).select do |inbox|
+      attrs = inbox.channel.additional_attributes || {}
+      attrs['source_provider'] == 'salesforce' && attrs['import_placeholder'] == true
     end
-    conversations = Conversation.where(inbox_id: from.id).update_all(inbox_id: to.id) # rubocop:disable Rails/SkipsModelValidations
-    messages = Message.where(inbox_id: from.id).update_all(inbox_id: to.id) # rubocop:disable Rails/SkipsModelValidations
-    puts "Moved #{conversations} conversations, #{messages} messages, #{moved_contact_inboxes} contact inboxes from ##{from.id} to ##{to.id}"
-    if from.channel_type == 'Channel::Api' && from.channel.additional_attributes&.dig('import_placeholder')
-      from.destroy!
-      puts "Deleted placeholder inbox ##{from.id} (#{from.name})"
+    placeholders.group_by { |inbox| inbox.channel.additional_attributes['source_bucket'] }.each_value do |inboxes|
+      keeper, *duplicates = inboxes
+      duplicates.each do |duplicate|
+        result = DataImports::Salesforce::InboxRelocator.new(from: duplicate, to: keeper).perform
+        puts "##{duplicate.id} -> ##{keeper.id} (#{keeper.name}): #{result.conversations} conversations, #{result.messages} messages"
+      end
     end
   end
 

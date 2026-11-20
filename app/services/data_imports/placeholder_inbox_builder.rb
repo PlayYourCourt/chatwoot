@@ -9,10 +9,19 @@ class DataImports::PlaceholderInboxBuilder
 
   def inbox_for(source_type)
     bucket = @source_bucket.for(source_type)
-    placeholder_inboxes[bucket[:key]] ||= create_placeholder_inbox(bucket)
+    placeholder_inboxes[bucket[:key]] ||= find_or_create_placeholder_inbox(bucket)
   end
 
   private
+
+  # Parallel page chains can meet the same new bucket at once: the account row lock serialises them and the
+  # later ones find the inbox the first created.
+  def find_or_create_placeholder_inbox(bucket)
+    @account.with_lock do
+      @placeholder_inboxes = nil
+      placeholder_inboxes[bucket[:key]] || create_placeholder_inbox(bucket)
+    end
+  end
 
   def placeholder_inboxes
     @placeholder_inboxes ||= @account.inboxes.includes(:channel).where(channel_type: 'Channel::Api').each_with_object({}) do |inbox, inboxes|

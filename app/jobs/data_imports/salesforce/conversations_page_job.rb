@@ -11,6 +11,8 @@ class DataImports::Salesforce::ConversationsPageJob < DataImports::Salesforce::B
     end
 
     importer.shard_finished('conversations', run_id)
+  rescue ActiveRecord::QueryCanceled
+    retry_page(data_import, starting_after, run_id, shard)
   rescue StandardError => e
     fail_unexpected_error(importer, e)
   end

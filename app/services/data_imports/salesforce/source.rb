@@ -30,7 +30,9 @@ class DataImports::Salesforce::Source
   def self.source_metadata(source_params)
     params = source_params.to_h.with_indifferent_access
     { 'phase' => params[:phase].presence || 'salesforce', 'since' => params[:since].presence,
-      'refresh' => (true if params[:refresh].present?), 'shards' => params[:shards].presence&.to_i }.compact
+      'refresh' => (true if params[:refresh].present?), 'shards' => params[:shards].presence&.to_i,
+      'retry_person_keys' => Array(params[:retry_person_keys]).presence,
+      'retry_thread_keys' => Array(params[:retry_thread_keys]).presence }.compact
   end
 
   def self.default_import_name
@@ -75,6 +77,8 @@ class DataImports::Salesforce::Source
     @since = metadata[:since].present? ? Time.zone.parse(metadata[:since].to_s) : nil
     @refresh = metadata[:refresh] == true
     @shards = (metadata[:shards].presence || DEFAULT_SHARDS).to_i.clamp(1, MAX_SHARDS)
+    @retry_person_keys = Array(metadata[:retry_person_keys])
+    @retry_thread_keys = Array(metadata[:retry_thread_keys])
     @normalizer = DataImports::Salesforce::Normalizer.new
   end
 
@@ -196,12 +200,13 @@ class DataImports::Salesforce::Source
     shard.nil? ? scope : scope.where('seq % ? = ?', @shards, shard)
   end
 
+  # Records whose items failed in an earlier import are walked again even when `since` would leave them out.
   def people_scope
-    DataImports::Salesforce::Staging::Person.in_scope(@phase, @since)
+    DataImports::Salesforce::Staging::Person.in_scope(@phase, @since, retry_keys: @retry_person_keys)
   end
 
   def threads_scope
-    DataImports::Salesforce::Staging::Thread.in_scope(@phase, @since)
+    DataImports::Salesforce::Staging::Thread.in_scope(@phase, @since, retry_keys: @retry_thread_keys)
   end
 
   # A short page means we are done; a full page may have more.

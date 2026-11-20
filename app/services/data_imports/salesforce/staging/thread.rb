@@ -2,8 +2,11 @@ class DataImports::Salesforce::Staging::Thread < DataImports::Salesforce::Stagin
   self.table_name = 'sf.threads'
   self.primary_key = 'thread_key'
 
-  def self.in_scope(phase, since)
+  def self.in_scope(phase, since, retry_keys: [])
     scope = where(phase: phase)
-    since.present? ? scope.where('last_at >= ?', since) : scope
+    return scope if since.blank?
+
+    active = scope.where('last_at >= ?', since)
+    retry_keys.empty? ? active : active.or(scope.where(thread_key: retry_keys))
   end
 end

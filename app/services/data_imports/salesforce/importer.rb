@@ -156,6 +156,35 @@ class DataImports::Salesforce::Importer < DataImports::Importer
   def reconcile_item_stats(_source_object_type); end
   def reconcile_message_stats; end
 
+  # The generic importer holds the import's row lock while it writes each message batch so that an abandoned run
+  # never writes. With many chains that lock serialises every message write and the waits exceed the statement
+  # timeout; the throttled stop check is the guard here instead.
+  def bulk_write_message_entries(conversation, contact, batch_builder, entries)
+    return if import_stopped?
+
+    persist_message_entries(conversation, contact, batch_builder.refresh(entries).entries)
+  end
+
+  def import_unprepared_message(conversation, contact, batch_builder, source_entry)
+    return if import_stopped?
+
+    with_query_timeout_retry do
+      import_message(conversation, contact, batch_builder.perform([source_entry]).entries.first)
+    end
+  rescue StandardError => e
+    fail_message(conversation, source_entry[:source_id], source_entry[:part], e)
+  end
+
+  def fallback_message_entry(conversation, contact, batch_builder, entry)
+    return if import_stopped?
+
+    with_query_timeout_retry do
+      import_message(conversation, contact, batch_builder.refresh([entry]).entries.first, reindex: false)
+    end
+  rescue ActiveRecord::ActiveRecordError => e
+    fail_message(conversation, entry.source_id, entry.part, e)
+  end
+
   def contact_inbox_for(contact, inbox)
     source_id = live_source_id(contact, inbox) || "salesforce:#{contact.id}"
     ContactInbox.find_or_create_by!(contact: contact, inbox: inbox) do |contact_inbox|
