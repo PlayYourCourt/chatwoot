@@ -10,8 +10,9 @@ export const MESSAGE_MAX_LENGTH = {
   INSTAGRAM: 1000,
   // https://business-api.tiktok.com/portal/docs?id=1832184403754242
   TIKTOK: 6000,
-  // https://www.twilio.com/docs/glossary/what-sms-character-limit
-  TWILIO_SMS: 320,
+  // Twilio accepts up to 1600 characters and segments them; we allow 1500 so agents can send longer texts.
+  // https://help.twilio.com/articles/360033806753-Maximum-Message-Length-with-Twilio-Programmable-Messaging
+  TWILIO_SMS: 1500,
   // https://help.twilio.com/articles/360033806753-Maximum-Message-Length-with-Twilio-Programmable-Messaging
   TWILIO_WHATSAPP: 1600,
   // https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages#text-object
