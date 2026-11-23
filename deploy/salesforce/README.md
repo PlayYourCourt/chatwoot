@@ -76,6 +76,12 @@ rails "salesforce:relocate_inbox[<placeholder inbox id>,<twilio inbox id>]"
 - SMS: `failed`/`undelivered` dropped, duplicates within a minute dropped
 - emails deduplicated on `MessageIdentifier`; Freshdesk system notes (`created_by: …`) dropped
 - threads with no person or no content skipped
+- enhanced notes (the Notes related list on Accounts, Opportunities and Leads; stage `05_notes.sql`) become
+  Chatwoot contact notes on the person, headed by title, record and author; the server-written
+  `System - Opp Close` / `System - Drip Halted` notes are dropped. They are only in a **full** export (the
+  trimmed exports have no `ContentVersion.csv`), and only an export made with *Include Salesforce Files and
+  Salesforce CRM Content document versions* ticked carries the note bodies; without it the loader warns and the
+  transform uses Salesforce's 255-character preview, which truncates roughly one note in ten.
 
 ## No data loss
 

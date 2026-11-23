@@ -87,7 +87,8 @@ class DataImports::Salesforce::Source
   def list_contacts(starting_after:, per_page:, shard: nil)
     scope = sharded(people_scope, shard)
     page = scope.where('seq > ?', starting_after.to_i).order(:seq).limit(per_page).to_a
-    response = paginated(page.map { |person| @normalizer.contact(person) }, page.last&.seq, per_page)
+    notes = DataImports::Salesforce::Staging::PersonNote.where(person_key: page.map(&:person_key)).order(:created_at).group_by(&:person_key)
+    response = paginated(page.map { |person| @normalizer.contact(person, notes.fetch(person.person_key, [])) }, page.last&.seq, per_page)
     response['total_count'] = scope.count if starting_after.blank? && shard.nil?
     response
   end

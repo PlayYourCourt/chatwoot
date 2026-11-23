@@ -1,7 +1,9 @@
 # Shapes staging rows into the payloads DataImports::Importer expects (the same shapes the Freshdesk
 # and Intercom normalizers produce). Timestamps are Unix integers because the importer validates them.
 class DataImports::Salesforce::Normalizer
-  def contact(person)
+  # `notes` (sf.person_notes rows) only travels with the contacts stage; the conversation stage rebuilds the
+  # contact payload without them.
+  def contact(person, notes = [])
     {
       'id' => person.person_key,
       'name' => person.name,
@@ -15,7 +17,8 @@ class DataImports::Salesforce::Normalizer
       'updated_at' => epoch(person.updated_at),
       'last_seen_at' => epoch(person.updated_at),
       'custom' => person.custom || {},
-      'raw' => person.raw || {}
+      'raw' => person.raw || {},
+      'notes' => notes.map { |note| contact_note(note) }
     }
   end
 
@@ -81,6 +84,13 @@ class DataImports::Salesforce::Normalizer
     return { 'type' => 'admin', 'name' => part.author_name, 'email' => part.from_addr }.compact unless part.direction == 'incoming'
 
     { 'type' => 'contact', 'name' => part.author_name, 'email' => part.from_addr }.compact
+  end
+
+  # A Chatwoot contact note has no author of its own for imported data, so the Salesforce author, record and
+  # date head the (markdown) content.
+  def contact_note(note)
+    heading = [note.title, note.about, [note.author, note.created_at&.strftime('%b %-d, %Y')].compact.join(', ')].compact_blank.join(' · ')
+    { 'id' => note.note_key, 'content' => "**#{heading}**\n\n#{note.body}", 'created_at' => epoch(note.created_at) }
   end
 
   def epoch(time)

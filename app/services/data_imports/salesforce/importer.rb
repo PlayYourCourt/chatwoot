@@ -14,7 +14,7 @@ class DataImports::Salesforce::Importer < DataImports::Importer
   OBJECT_TEAMS = { 'opportunity' => 'lesson sales', 'case' => 'support' }.freeze
   STOP_CHECK_INTERVAL = 10.seconds
   COUNTER_STATS = { 'contacts' => %w[imported skipped], 'conversations' => %w[imported skipped],
-                    'messages' => %w[imported skipped total], 'errors' => %w[count] }.freeze
+                    'messages' => %w[imported skipped total], 'notes' => %w[imported], 'errors' => %w[count] }.freeze
 
   def shards
     @source.shards
@@ -202,6 +202,27 @@ class DataImports::Salesforce::Importer < DataImports::Importer
   def contact_attributes(contact_payload)
     super.tap do |attrs|
       attrs[:contact_type] = Contact.contact_types[:customer] if contact_payload['contact_type'] == 'customer'
+    end
+  end
+
+  def default_stats
+    super.merge('notes' => { 'imported' => 0 })
+  end
+
+  def import_contact_item(item, contact_payload, source_id, already_handled)
+    super.tap { |contact| import_contact_notes(contact, contact_payload['notes']) }
+  end
+
+  # Salesforce notes on the person's Account, Opportunities and Leads become contact notes, once each (mapped by
+  # note id), so a re-import only adds notes written since.
+  def import_contact_notes(contact, notes)
+    Array(notes).each do |note|
+      next if find_mapping('note', note['id'])
+
+      created_at = timestamp_for(note['created_at'])
+      record = contact.notes.create!(content: note['content'], created_at: created_at, updated_at: created_at)
+      record_mapping('note', note['id'], record)
+      increment_stat('notes', 'imported')
     end
   end
 

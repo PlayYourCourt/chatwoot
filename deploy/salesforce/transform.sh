@@ -4,7 +4,7 @@
 #   deploy/salesforce/transform.sh 03 04      # re-run selected stages
 set -euo pipefail
 cd "$(dirname "$0")"
-stages=("$@"); [ ${#stages[@]} -eq 0 ] && stages=(01 02 03 04)
+stages=("$@"); [ ${#stages[@]} -eq 0 ] && stages=(01 02 03 04 05)
 for s in "${stages[@]}"; do
   f=$(ls sql/"${s}"_*.sql)
   echo "== $f  $(date +%H:%M:%S)"
