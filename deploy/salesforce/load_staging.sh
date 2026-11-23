@@ -57,14 +57,12 @@ for csv in "${!TABLES[@]}"; do
 done
 
 # Enhanced-note bodies. An export made with "Include Salesforce Files and Salesforce CRM Content document
-# versions" ticked carries every ContentVersion as a file inside the ZIPs, at the path in its VersionData
-# column; the note bodies (FileType SNOTE, small HTML) are read from there into sf.content_note_body. Without
-# that option the column is absent and the transform falls back to the 255-character TextPreview.
+# versions" ticked carries every ContentVersion as a file inside the ZIPs, at ContentVersion/<version id>; the
+# note bodies (FileType SNOTE, small text/HTML) are read from there into sf.content_note_body. Without that
+# option there are no such files and the transform falls back to the 255-character TextPreview.
 if [ -z "${ONLY:-}" ] || [[ ",$ONLY," == *",content_version,"* ]]; then
-  has_files=$("${PSQL[@]}" -tAc "SELECT count(*) FROM information_schema.columns
-    WHERE table_schema = 'sf' AND table_name = 'content_version' AND column_name = 'versiondata';")
   "${PSQL[@]}" -c 'DROP TABLE IF EXISTS sf.content_note_body; CREATE TABLE sf.content_note_body (id text PRIMARY KEY, body text);'
-  if [ "$has_files" = "1" ]; then
+  if [ "$("${PSQL[@]}" -tAc "SELECT to_regclass('sf.content_version') IS NOT NULL")" = t ]; then
     echo "== content_note_body <- ContentVersion files"
     read -r -d '' NOTE_BODIES <<'PY' || true
 import csv, sys, zipfile
@@ -72,22 +70,24 @@ members = {}
 for path in sys.argv[1:]:
     archive = zipfile.ZipFile(path)
     for name in archive.namelist():
-        members.setdefault(name, archive)
+        if name.startswith('ContentVersion/'):
+            members[name] = archive
 out = csv.writer(sys.stdout)
 missing = 0
-for note_id, member in csv.reader(sys.stdin):
-    archive = members.get(member) or members.get(member.lstrip('/'))
-    if archive is None:
+for (note_id,) in csv.reader(sys.stdin):
+    name = 'ContentVersion/' + note_id
+    if name in members:
+        out.writerow([note_id, members[name].read(name).decode('utf-8', 'replace').replace('\0', '')])
+    else:
         missing += 1
-        continue
-    out.writerow([note_id, archive.read(member).decode('utf-8', 'replace').replace('\0', '')])
-print(f'   note bodies missing from the ZIPs: {missing}', file=sys.stderr)
+if not members:
+    print('   export has no ContentVersion files: note bodies fall back to TextPreview', file=sys.stderr)
+elif missing:
+    print(f'   note bodies missing from the ZIPs: {missing}', file=sys.stderr)
 PY
-    "${PSQL[@]}" -c "\\copy (SELECT id, versiondata FROM sf.content_version WHERE filetype = 'SNOTE' AND islatest = '1') TO STDOUT WITH (FORMAT csv)" \
+    "${PSQL[@]}" -c "\\copy (SELECT id FROM sf.content_version WHERE filetype = 'SNOTE' AND islatest = '1') TO STDOUT WITH (FORMAT csv)" \
       | python3 -I -c "$NOTE_BODIES" "$ZIP_DIR"/*.ZIP \
       | "${PSQL[@]}" -c "\\copy sf.content_note_body FROM STDIN WITH (FORMAT csv)"
-  else
-    echo "skip content_note_body (export has no files; note bodies fall back to TextPreview)"
   fi
   "${PSQL[@]}" -tAc "SELECT '   rows: ' || count(*) FROM sf.content_note_body;"
 fi
