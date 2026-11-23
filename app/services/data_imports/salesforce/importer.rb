@@ -238,12 +238,12 @@ class DataImports::Salesforce::Importer < DataImports::Importer
   end
 
   def refresh_mapped_conversation(chatwoot_conversation, conversation)
-    apply_salesforce_state(chatwoot_conversation, conversation) if @source.refresh?
+    apply_salesforce_state(chatwoot_conversation, conversation) if @source.refresh?(chatwoot_conversation)
   end
 
   # A refresh never changes email/phone (uniqueness against other contacts) and never demotes a customer to a lead.
   def refresh_mapped_contact(contact, contact_payload)
-    return unless @source.refresh?
+    return unless @source.refresh?(contact)
 
     attrs = contact_attributes(contact_payload)
     updates = {

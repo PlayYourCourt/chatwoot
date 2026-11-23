@@ -14,7 +14,8 @@ namespace :salesforce do
   end
 
   desc 'Start a Salesforce import from the staging DB. Usage: rails "salesforce:import[ACCOUNT_ID,salesforce|freshdesk,2026-08-10,refresh,6]" ' \
-       '(refresh: re-apply Salesforce state to records an earlier import created; last argument: parallel chains, default 6)'
+       '(refresh: re-apply Salesforce state to records an earlier import created; give an ISO 8601 time instead, e.g. ' \
+       '2026-11-23T09:30:00-05:00, to leave records changed in Chatwoot after it alone; last argument: parallel chains, default 6)'
   task :import, [:account_id, :phase, :since, :refresh, :shards] => :environment do |_task, args|
     account = Account.find(args[:account_id])
     initiated_by = account.administrators.first

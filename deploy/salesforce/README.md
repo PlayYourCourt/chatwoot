@@ -154,6 +154,14 @@ A refresh import re-applies to already-imported records: conversation status (an
 priority and labels (added, never removed); contact name, type (lead → customer only) and custom /
 source attributes. Email and phone are never changed by a refresh. Nothing is deleted.
 
+Once the team works in Chatwoot, give the moment they moved over instead of the word `refresh`: Salesforce
+state is applied only to conversations and contacts that have not changed in Chatwoot since then (by
+`updated_at`: an agent's edit, a new message, a reply), so Chatwoot wins for anything touched after it.
+
+```bash
+$R "salesforce:import[1,salesforce,2026-11-18,2026-11-23T09:30:00-05:00,16]"
+```
+
 ## Re-running a stage
 
 - Loader: `ONLY=interaction,legacy_note deploy/salesforce/load_staging.sh "<zip dir>"` truncates and reloads those tables.

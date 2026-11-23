@@ -18,9 +18,10 @@ class DataImports::Salesforce::Source
   attr_reader :provider, :display_name, :contacts_per_page, :conversations_per_page, :phase, :since, :shards
 
   # Re-apply Salesforce state (conversation status, owner, team, priority, labels; contact attributes) to records
-  # an earlier import created. For re-imports made while Salesforce is still the system of record.
-  def refresh?
-    @refresh
+  # an earlier import created. For re-imports made while Salesforce is still the system of record. With a cutoff
+  # (the moment the team moved to Chatwoot) a record changed in Chatwoot after it is left alone.
+  def refresh?(record)
+    @refresh && (@refresh_cutoff.nil? || record.updated_at <= @refresh_cutoff)
   end
 
   def self.credentials_validator(source_params:, import_types:)
@@ -29,8 +30,10 @@ class DataImports::Salesforce::Source
 
   def self.source_metadata(source_params)
     params = source_params.to_h.with_indifferent_access
+    refresh = params[:refresh].presence
     { 'phase' => params[:phase].presence || 'salesforce', 'since' => params[:since].presence,
-      'refresh' => (true if params[:refresh].present?), 'shards' => params[:shards].presence&.to_i,
+      'refresh' => (true if refresh), 'refresh_cutoff' => (Time.iso8601(refresh).iso8601 if refresh && refresh != 'refresh'),
+      'shards' => params[:shards].presence&.to_i,
       'retry_person_keys' => Array(params[:retry_person_keys]).presence,
       'retry_thread_keys' => Array(params[:retry_thread_keys]).presence }.compact
   end
@@ -76,6 +79,7 @@ class DataImports::Salesforce::Source
     @phase = PHASES.include?(metadata[:phase]) ? metadata[:phase] : 'salesforce'
     @since = metadata[:since].present? ? Time.zone.parse(metadata[:since].to_s) : nil
     @refresh = metadata[:refresh] == true
+    @refresh_cutoff = metadata[:refresh_cutoff] && Time.iso8601(metadata[:refresh_cutoff])
     @shards = (metadata[:shards].presence || DEFAULT_SHARDS).to_i.clamp(1, MAX_SHARDS)
     @retry_person_keys = Array(metadata[:retry_person_keys])
     @retry_thread_keys = Array(metadata[:retry_thread_keys])
