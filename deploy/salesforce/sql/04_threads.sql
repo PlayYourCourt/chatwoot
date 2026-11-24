@@ -65,6 +65,8 @@ CREATE OR REPLACE FUNCTION sf.person_by_phone(p text) RETURNS text LANGUAGE sql 
   SELECT person_key FROM sf.people WHERE p IS NOT NULL AND phone = p LIMIT 1
 $$;
 
+-- people this stage adds for case senders (below) are rebuilt on every run, so the stage can be re-run alone
+DELETE FROM sf.people WHERE person_key LIKE 'case_sender:%';
 DROP TABLE IF EXISTS sf.threads;
 CREATE TABLE sf.threads (
   thread_key   text PRIMARY KEY,
@@ -121,7 +123,7 @@ SELECT 'case:' || c.id,
          CASE WHEN sf.nz(c.pyc_legacy_id__c) IS NOT NULL THEN 'freshdesk' END,
          sf.slug(c.pyc_legacy_ticket_type__c),
          -- subject only: the auto-reply queue also holds real customer mail (refunds, cancellations)
-         CASE WHEN c.subject ~* '(mail system error|delivery status notification|failure notice|automatic reply|undeliverable|systems bounce)' THEN 'bounce' END], NULL),
+         CASE WHEN c.subject ~* '(mail system error|delivery status notification|failure notice|automatic reply|undeliverable|systems bounce|could not send message|returned mail|mail delivery failed)' THEN 'bounce' END], NULL),
        coalesce(tp.parts_count, 0),
        jsonb_strip_nulls(jsonb_build_object(
          'sf_object', 'case', 'salesforce_id', c.id, 'case_number', sf.nz(c.casenumber), 'case_origin', sf.nz(c.origin),
@@ -266,6 +268,41 @@ LEFT JOIN sf.thread_parts tp ON tp.thread_key = 'fd:' || ft.legacy_id;
 -- bounces and auto-replies are noise
 INSERT INTO sf.cleaning_log SELECT 'threads', 'bounce_case_skipped', thread_key, subject FROM sf.threads WHERE sf_object = 'case' AND 'bounce' = ANY(labels);
 DELETE FROM sf.threads WHERE sf_object = 'case' AND 'bounce' = ANY(labels);
+-- Cases whose sender is no Contact, Lead or Account (email-to-case from a new address): the sender becomes a
+-- person, keyed by address, so the case is imported rather than skipped. Junk and no-reply / mailer addresses and
+-- placeholder phones do not count as a sender, and a case with no content gets no person (it is skipped below).
+DROP TABLE IF EXISTS sf.case_sender;
+CREATE TABLE sf.case_sender AS
+SELECT t.thread_key, 'case_sender:' || coalesce(s.email, s.phone) AS person_key, s.email, s.phone,
+       sf.name_part(c.suppliedname) AS name, t.created_at
+FROM sf.threads t
+JOIN sf."case" c ON t.thread_key = 'case:' || c.id
+CROSS JOIN LATERAL (SELECT sf.email_norm(c.suppliedemail) AS email,
+                           coalesce(sf.phone_e164(c.mobilephone__c), sf.phone_e164(c.suppliedphone)) AS phone) r
+CROSS JOIN LATERAL (SELECT
+  CASE WHEN NOT EXISTS (SELECT 1 FROM sf.junk_email j WHERE r.email ~ j.pattern)
+        AND r.email !~* '^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?|notifications?)([._+-]|@)' THEN r.email END AS email,
+  CASE WHEN NOT EXISTS (SELECT 1 FROM sf.phone_blocklist b WHERE b.phone = r.phone) THEN r.phone END AS phone) s
+WHERE t.person_key IS NULL AND t.sf_object = 'case' AND coalesce(s.email, s.phone) IS NOT NULL
+  AND (t.parts_count > 0 OR t.first_body IS NOT NULL);
+
+INSERT INTO sf.people (person_key, name, email, phone, contact_type, created_at, updated_at, custom, raw)
+SELECT person_key, coalesce(name, split_part(email, '@', 1), phone), email, phone, 'lead', created_at, created_at,
+       jsonb_build_object('lead_source', 'salesforce_case'),
+       jsonb_build_object('case_sender', jsonb_strip_nulls(jsonb_build_object('name', name, 'email', email, 'phone', phone)))
+FROM (SELECT person_key,
+             (array_agg(name ORDER BY name IS NULL, created_at DESC))[1] AS name,
+             (array_agg(email ORDER BY email IS NULL, created_at DESC))[1] AS email,
+             (array_agg(phone ORDER BY phone IS NULL, created_at DESC))[1] AS phone,
+             min(created_at) AS created_at
+      FROM sf.case_sender GROUP BY person_key) g;
+-- a phone must stay unique: an email-keyed sender may carry the number of another sender
+WITH d AS (SELECT person_key, row_number() OVER (PARTITION BY phone ORDER BY created_at, person_key) rn
+           FROM sf.people WHERE phone IS NOT NULL AND person_key LIKE 'case_sender:%')
+UPDATE sf.people p SET phone = NULL FROM d WHERE d.rn > 1 AND p.person_key = d.person_key;
+UPDATE sf.threads t SET person_key = s.person_key FROM sf.case_sender s WHERE s.thread_key = t.thread_key;
+INSERT INTO sf.cleaning_log SELECT 'threads', 'case_sender_person_created', person_key, NULL FROM sf.case_sender GROUP BY person_key;
+
 INSERT INTO sf.cleaning_log SELECT 'threads', 'thread_without_person_skipped', thread_key, sf_object FROM sf.threads WHERE person_key IS NULL;
 DELETE FROM sf.threads WHERE person_key IS NULL;
 INSERT INTO sf.cleaning_log SELECT 'threads', 'thread_without_content_skipped', thread_key, sf_object FROM sf.threads WHERE parts_count = 0 AND first_body IS NULL;

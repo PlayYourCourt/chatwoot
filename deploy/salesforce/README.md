@@ -75,7 +75,9 @@ rails "salesforce:relocate_inbox[<placeholder inbox id>,<twilio inbox id>]"
 - leads attached to their contact by conversion, email or phone; repeated lead submissions collapsed
 - SMS: `failed`/`undelivered` dropped, duplicates within a minute dropped
 - emails deduplicated on `MessageIdentifier`; Freshdesk system notes (`created_by: …`) dropped
-- threads with no person or no content skipped
+- cases from a sender who is no Contact, Lead or Account (email-to-case from a new address) get a new person
+  from the case's supplied email / phone / name (`person_key` `case_sender:<address>`, lead source
+  `salesforce_case`); other threads with no person or no content are skipped
 - enhanced notes (the Notes related list on Accounts, Opportunities and Leads; stage `05_notes.sql`) become
   Chatwoot contact notes on the person, headed by title, record and author; the server-written
   `System - Opp Close` / `System - Drip Halted` notes are dropped. They are only in a **full** export (the
@@ -160,6 +162,13 @@ state is applied only to conversations and contacts that have not changed in Cha
 
 ```bash
 $R "salesforce:import[1,salesforce,2026-11-18,2026-11-23T09:30:00-05:00,16]"
+```
+
+To import one slice of people and their threads regardless of date, give a person key prefix as the last argument,
+e.g. the case senders added by the transform:
+
+```bash
+$R "salesforce:import[1,salesforce,,,4,case_sender:]"
 ```
 
 ## Re-running a stage

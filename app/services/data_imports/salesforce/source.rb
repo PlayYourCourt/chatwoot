@@ -3,6 +3,7 @@
 #   phase: 'salesforce' (cases, leads, opportunities, SMS, email) or 'freshdesk' (legacy tickets)
 #   since: optional ISO date; only threads active on/after it, and the people they touch
 #   shards: how many page chains run in parallel (rows are split by `seq % shards`)
+#   people: optional person_key prefix (e.g. 'case_sender:'); only those people and their threads, ignoring since
 class DataImports::Salesforce::Source
   PROVIDER = 'salesforce'.freeze
   DISPLAY_NAME = 'Salesforce'.freeze
@@ -35,7 +36,7 @@ class DataImports::Salesforce::Source
       'refresh' => (true if refresh), 'refresh_cutoff' => (Time.iso8601(refresh).iso8601 if refresh && refresh != 'refresh'),
       'shards' => params[:shards].presence&.to_i,
       'retry_person_keys' => Array(params[:retry_person_keys]).presence,
-      'retry_thread_keys' => Array(params[:retry_thread_keys]).presence }.compact
+      'retry_thread_keys' => Array(params[:retry_thread_keys]).presence, 'people' => params[:people].presence }.compact
   end
 
   def self.default_import_name
@@ -83,6 +84,7 @@ class DataImports::Salesforce::Source
     @shards = (metadata[:shards].presence || DEFAULT_SHARDS).to_i.clamp(1, MAX_SHARDS)
     @retry_person_keys = Array(metadata[:retry_person_keys])
     @retry_thread_keys = Array(metadata[:retry_thread_keys])
+    @people_prefix = metadata[:people].presence
     @normalizer = DataImports::Salesforce::Normalizer.new
   end
 
@@ -207,10 +209,16 @@ class DataImports::Salesforce::Source
 
   # Records whose items failed in an earlier import are walked again even when `since` would leave them out.
   def people_scope
+    return DataImports::Salesforce::Staging::Person.where('person_key LIKE ?', "#{@people_prefix}%") if @people_prefix
+
     DataImports::Salesforce::Staging::Person.in_scope(@phase, @since, retry_keys: @retry_person_keys)
   end
 
   def threads_scope
+    if @people_prefix
+      return DataImports::Salesforce::Staging::Thread.where(phase: @phase).where('person_key LIKE ?', "#{@people_prefix}%")
+    end
+
     DataImports::Salesforce::Staging::Thread.in_scope(@phase, @since, retry_keys: @retry_thread_keys)
   end
 
