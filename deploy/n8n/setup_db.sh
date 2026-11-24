@@ -11,6 +11,8 @@
 # Creates: role n8n + database n8n (n8n's own tables), role seq_engine + database seq (engine state, no DELETE
 # on logs), role chatwoot_readonly with SELECT on the Chatwoot tables the Gate reads (CHATWOOT_DB, default
 # chatwoot_production; CHATWOOT_DB=chatwoot on production). Passwords are set to the given values on every run.
+# With SEQ_READONLY_PASSWORD set it also creates role seq_readonly (SELECT on the seq tables) for Chatwoot's
+# Reports → Sequences page.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -51,4 +53,20 @@ run -d n8n -c 'GRANT ALL ON SCHEMA public TO n8n'   # n8n creates its own tables
 
 run -d seq < deploy/n8n/sql/seq_schema.sql
 run -d "$CHATWOOT_DB" < deploy/n8n/sql/chatwoot_readonly.sql
+
+# Optional: the role Chatwoot's Reports → Sequences page reads the seq database with (SEQUENCES_DATABASE_URL).
+# SELECT only, and nothing on the API keys.
+if [ -n "${SEQ_READONLY_PASSWORD:-}" ]; then
+  run <<SQL
+SELECT format('CREATE ROLE seq_readonly LOGIN PASSWORD %L', '$SEQ_READONLY_PASSWORD')
+  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'seq_readonly') \gexec
+ALTER ROLE seq_readonly PASSWORD '$SEQ_READONLY_PASSWORD';
+GRANT CONNECT ON DATABASE seq TO seq_readonly;
+SQL
+  run -d seq <<SQL
+GRANT USAGE ON SCHEMA public TO seq_readonly;
+GRANT SELECT ON seq_flows, seq_enrollments, seq_step_logs, seq_message_logs, seq_events, seq_enroll_attempts, seq_errors TO seq_readonly;
+SQL
+  echo "seq_readonly is ready"
+fi
 echo "n8n, seq and chatwoot_readonly are ready"

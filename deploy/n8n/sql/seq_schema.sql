@@ -102,8 +102,47 @@ CREATE TABLE IF NOT EXISTS seq_api_keys (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- Which n8n run wrote a row (deploy/n8n/README.md "Reporting"): the Chatwoot reports page links
+-- <n8n>/workflow/<workflow_id>/executions/<execution_id>. NULL on rows written before the columns existed.
+ALTER TABLE seq_step_logs ADD COLUMN IF NOT EXISTS workflow_id text;
+ALTER TABLE seq_step_logs ADD COLUMN IF NOT EXISTS execution_id text;
+ALTER TABLE seq_message_logs ADD COLUMN IF NOT EXISTS workflow_id text;
+ALTER TABLE seq_message_logs ADD COLUMN IF NOT EXISTS execution_id text;
+CREATE INDEX IF NOT EXISTS seq_enrollments_flow_enrolled ON seq_enrollments (flow_key, enrolled_at);
+
+-- Every call to "Seq: enroll contact" (the enroll API and the enroll-<flow> label), including the refused ones,
+-- which leave no enrollment row. flow_key is free text: an unknown or invalid flow is recorded too.
+CREATE TABLE IF NOT EXISTS seq_enroll_attempts (
+  id            bigserial PRIMARY KEY,
+  flow_key      text,
+  phone         text,
+  email         text,
+  contact_id    bigint,
+  source        text,
+  outcome       text NOT NULL,                        -- enrolled, skipped_*, unknown_flow, invalid_*, contact_failed
+  enrollment_id bigint,
+  workflow_id   text,
+  execution_id  text,
+  attempted_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS seq_enroll_attempts_flow ON seq_enroll_attempts (flow_key, attempted_at);
+CREATE INDEX IF NOT EXISTS seq_enroll_attempts_contact ON seq_enroll_attempts (contact_id);
+
+-- Failed n8n executions, written by "Seq: error handler" next to its email alert.
+CREATE TABLE IF NOT EXISTS seq_errors (
+  id            bigserial PRIMARY KEY,
+  workflow_id   text,
+  workflow_name text,
+  execution_id  text,
+  node          text,
+  message       text,
+  occurred_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS seq_errors_occurred ON seq_errors (occurred_at);
+
 -- What the n8n engine credential may do. No DELETE anywhere: logs are the record.
 GRANT USAGE ON SCHEMA public TO seq_engine;
 GRANT SELECT, INSERT, UPDATE ON seq_flows, seq_enrollments, seq_step_logs, seq_message_logs, seq_events TO seq_engine;
+GRANT SELECT, INSERT ON seq_enroll_attempts, seq_errors TO seq_engine;
 GRANT SELECT, UPDATE ON seq_api_keys TO seq_engine;    -- UPDATE for last_used_at; keys are created by hand
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO seq_engine;

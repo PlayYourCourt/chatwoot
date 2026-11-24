@@ -13,13 +13,51 @@
       "parameters": {}
     },
     {
+      "id": "361cb91e-4f73-5c5f-8fbb-7fb90f986419",
+      "name": "Error SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n// The n8n run that writes a log row: Chatwoot's Reports \u2192 Sequences page links to it (workflow/<id>/executions/<id>).\nconst RUN_COLS = 'workflow_id, execution_id';\nconst RUN_VALS = `${q($workflow.id)}, ${q($execution.id)}`;\n\n// An execution error carries `execution`; a trigger that failed to start carries `trigger` instead.\nreturn $input.all().map(i => {\n  const e = i.json;\n  const error = (e.execution && e.execution.error) || (e.trigger && e.trigger.error) || {};\n  return { json: { error_sql: `INSERT INTO seq_errors (workflow_id, workflow_name, execution_id, node, message)\n    VALUES (${q(e.workflow && e.workflow.id)}, ${q(e.workflow && e.workflow.name)}, ${q(e.execution && e.execution.id)},\n            ${q(e.execution && e.execution.lastNodeExecuted)}, ${q(String(error.message || JSON.stringify(error)).slice(0, 2000))})` } };\n});\n"
+      }
+    },
+    {
+      "id": "1f24cc53-8e42-5b49-b263-731c30b7fa17",
+      "name": "Record error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.error_sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
       "id": "f3988860-df74-5e8a-9931-4bfe562bfce4",
       "name": "Email alert",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
         220,
-        0
+        160
       ],
       "parameters": {
         "fromEmail": "support@playyourcourt.com",
@@ -39,8 +77,8 @@
       }
     },
     {
-      "id": "9598e792-1a1c-531f-a63b-a7440328eadd",
-      "name": "Note f761232c",
+      "id": "e11e46c0-f43a-5947-90a6-4731861307a6",
+      "name": "Note 89308e48",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -48,9 +86,9 @@
         -180
       ],
       "parameters": {
-        "content": "## Seq: error handler\nSet as the Error Workflow of every engine workflow (Settings \u2192 Error workflow). Housekeeping releases the claims of a failed run.",
+        "content": "## Seq: error handler\nSet as the Error Workflow of every engine workflow (Settings \u2192 Error workflow). Emails the alert and records the failed run in `seq_errors` (shown on Chatwoot's Reports \u2192 Sequences page). Housekeeping releases the claims of a failed run.",
         "width": 700,
-        "height": 100,
+        "height": 120,
         "color": 1
       }
     }
@@ -60,7 +98,23 @@
       "main": [
         [
           {
+            "node": "Error SQL",
+            "type": "main",
+            "index": 0
+          },
+          {
             "node": "Email alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error SQL": {
+      "main": [
+        [
+          {
+            "node": "Record error",
             "type": "main",
             "index": 0
           }

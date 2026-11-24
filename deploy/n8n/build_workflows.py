@@ -36,13 +36,16 @@ def node(name, type_, version, params, pos, **extra):
     return n
 
 
-def pg(name, cred, sql, pos, always=False):
-    """Postgres executeQuery, one query per input item (v2.8)."""
+def pg(name, cred, sql, pos, always=False, on_error_continue=False):
+    """Postgres executeQuery, one query per input item (v2.8). on_error_continue: a failed query does not fail the
+    run (for log writes that must never block the real work)."""
     n = node(name, 'n8n-nodes-base.postgres', 2.8,
              {'operation': 'executeQuery', 'query': sql, 'options': {'queryBatching': 'independently'}},
              pos, credentials={'postgres': dict(cred)})
     if always:
         n['alwaysOutputData'] = True
+    if on_error_continue:
+        n['onError'] = 'continueRegularOutput'
     return n
 
 
@@ -162,6 +165,9 @@ const e164 = v => {
   if (d.length === 11 && d[0] === '1') return '+' + d;
   return null;
 };
+// The n8n run that writes a log row: Chatwoot's Reports → Sequences page links to it (workflow/<id>/executions/<id>).
+const RUN_COLS = 'workflow_id, execution_id';
+const RUN_VALS = `${q($workflow.id)}, ${q($execution.id)}`;
 """
 
 # ----------------------------------------------------------------------------------------------- Gate
@@ -364,10 +370,10 @@ for (const item of $('Chatwoot facts').all()) {
   let writeback_sql = null;
   if (decision === 'defer') {
     writeback_sql = `WITH e AS (UPDATE seq_enrollments SET next_run_at = ${q(nextRun.toISO())}, claimed_at = NULL, defer_count = defer_count + 1 WHERE id = ${row.id} RETURNING id, current_step)
-      INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, inputs) SELECT id, current_step, 'deferred', ${q(reason)}, ${qj(inputs)} FROM e`;
+      INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, inputs, ${RUN_COLS}) SELECT id, current_step, 'deferred', ${q(reason)}, ${qj(inputs)}, ${RUN_VALS} FROM e`;
   } else if (decision === 'exit') {
     writeback_sql = `WITH e AS (UPDATE seq_enrollments SET status = 'exited', ended_at = now(), exit_reason = ${q(reason)}, claimed_at = NULL WHERE id = ${row.id} AND status = 'active' RETURNING id, current_step)
-      INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, inputs) SELECT id, current_step, 'exited', ${q(reason)}, ${qj(inputs)} FROM e`;
+      INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, inputs, ${RUN_COLS}) SELECT id, current_step, 'exited', ${q(reason)}, ${qj(inputs)}, ${RUN_VALS} FROM e`;
   }
   const name = facts.name || '';
   let exit_note = null;
@@ -425,8 +431,8 @@ for (const item of $input.all()) {
   const variant = r.variant || 'A';
   const key = `${r.enrollment_id}:${r.current_step}:${variant}`;
   const status = error ? 'skipped' : 'pending';
-  const log_sql = `INSERT INTO seq_message_logs (enrollment_id, contact_id, inbox_id, step, variant, body, idempotency_key, status, error, timezone, timezone_source, local_time, consent_snapshot, sent_by)
-    VALUES (${r.enrollment_id}, ${c.id}, ${r.flow.inbox_id}, ${q(r.current_step)}, ${q(variant)}, ${q(body)}, ${q(key)}, ${q(status)}, ${q(error)}, ${q(r.timezone)}, ${q(r.timezone_source)}, ${q(r.local_time)}, ${qj({ opted_out_at: (c.attrs || {}).sms_opted_out_at || null })}, 'engine')
+  const log_sql = `INSERT INTO seq_message_logs (enrollment_id, contact_id, inbox_id, step, variant, body, idempotency_key, status, error, timezone, timezone_source, local_time, consent_snapshot, sent_by, ${RUN_COLS})
+    VALUES (${r.enrollment_id}, ${c.id}, ${r.flow.inbox_id}, ${q(r.current_step)}, ${q(variant)}, ${q(body)}, ${q(key)}, ${q(status)}, ${q(error)}, ${q(r.timezone)}, ${q(r.timezone_source)}, ${q(r.local_time)}, ${qj({ opted_out_at: (c.attrs || {}).sms_opted_out_at || null })}, 'engine', ${RUN_VALS})
     ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`;
   out.push({ json: { ...r, body, variant, idempotency_key: key, render_error: error, log_sql } });
 }
@@ -486,7 +492,7 @@ const finish = (r, status, message_id, error) => {
     ? `UPDATE seq_message_logs SET status = ${q(status === 'already_sent' ? 'skipped' : status)}, chatwoot_message_id = ${message_id || 'NULL'}, error = ${q(error)} WHERE id = ${r.log_id}`
     : `SELECT 1`;
   const update_sql = `WITH l AS (${logUpdate}), e AS (${enrollment_sql})
-    INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, inputs) VALUES (${r.enrollment_id}, ${q(r.current_step)}, ${q(stepOutcome)}, ${q(error || (status === 'already_sent' ? 'already_sent' : null))}, ${qj({ status, send_result, message_id, next_step: r.next_step })})`;
+    INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, inputs, ${RUN_COLS}) VALUES (${r.enrollment_id}, ${q(r.current_step)}, ${q(stepOutcome)}, ${q(error || (status === 'already_sent' ? 'already_sent' : null))}, ${qj({ status, send_result, message_id, next_step: r.next_step })}, ${RUN_VALS})`;
   out.push({ json: { enrollment_id: r.enrollment_id, step: r.current_step, status, send_result, message_id, error, update_sql } });
 };
 sentRows.forEach((row, i) => { const res = (httpItems[i] || {}).json || { error: 'no response item' }; const c = classify(res); finish(row.json, c.status, c.message_id, c.error); });
@@ -679,7 +685,21 @@ return out;
 ENROLL_RESULT_JS = r"""
 const req = $('Enroll SQL').all();
 return $input.all().map((item, i) => ({ json: { outcome: item.json.outcome || req[i].json.outcome, enrollment_id: item.json.id || null,
-  contact_id: req[i].json.contact_id || null, flow: req[i].json.flow, phone: req[i].json.phone } }));
+  contact_id: req[i].json.contact_id || null, flow: req[i].json.flow, phone: req[i].json.phone,
+  email: req[i].json.email || null, source: req[i].json.source || null } }));
+"""
+
+# Every attempt is recorded, refused ones included (they leave no enrollment row), with the n8n run that handled it.
+ENROLL_ATTEMPT_JS = JS_HELPERS + r"""
+return $input.all().map(item => {
+  const r = item.json;
+  return { json: { ...r, attempt_sql: `INSERT INTO seq_enroll_attempts (flow_key, phone, email, contact_id, source, outcome, enrollment_id, ${RUN_COLS})
+    VALUES (${q(r.flow)}, ${q(r.phone)}, ${q(r.email)}, ${r.contact_id || 'NULL'}, ${q(r.source)}, ${q(r.outcome)}, ${r.enrollment_id || 'NULL'}, ${RUN_VALS})` } };
+});
+"""
+
+ENROLL_RETURN_JS = r"""
+return $('Attempt SQL').all().map(i => { const { attempt_sql, email, source, ...rest } = i.json; return { json: rest }; });
 """
 
 
@@ -694,14 +714,19 @@ def enroll_contact_workflow():
         code('Enroll SQL', ENROLL_SQL_JS, (5 * X, -100)),
         pg('Insert enrollment', CRED_SEQ, '={{ $json.enroll_sql }}', (6 * X, -100), always=True),
         code('Result', ENROLL_RESULT_JS, (7 * X, -100)),
-        code('Invalid', "return $input.all().map(i => ({ json: { outcome: i.json.outcome, enrollment_id: null, contact_id: null, flow: i.json.flow, phone: i.json.phone } }));", (3 * X, 120)),
+        code('Invalid', "return $input.all().map(i => ({ json: { outcome: i.json.outcome, enrollment_id: null, contact_id: null, flow: i.json.flow, phone: i.json.phone, email: i.json.email || null, source: i.json.source || null } }));", (3 * X, 120)),
+        code('Attempt SQL', ENROLL_ATTEMPT_JS, (8 * X, 0)),
+        pg('Log attempt', CRED_SEQ, '={{ $json.attempt_sql }}', (9 * X, 0), always=True, on_error_continue=True),
+        code('Return', ENROLL_RETURN_JS, (10 * X, 0)),
         sticky('## Seq: enroll contact\nInput: `{flow, phone_number, email?, first_name?, last_name?, source?, checkout_url?, params?}`. Upserts the Chatwoot contact '
                '(outreach endpoint without content), checks consent, applies the flow\'s re-entry policy and inserts the enrollment. '
-               'Returns `outcome`: enrolled, skipped_active, skipped_reentry, skipped_no_consent, unknown_flow, invalid_phone, invalid_flow.',
+               'Returns `outcome`: enrolled, skipped_active, skipped_reentry, skipped_no_consent, unknown_flow, invalid_phone, invalid_flow. '
+               'Every call is recorded in `seq_enroll_attempts` with its outcome.',
                (0, -240), 1000, 150),
     ]
     edges = [('Request', 'Normalize'), ('Normalize', 'Valid?'), ('Valid?', 'Upsert contact', 0), ('Valid?', 'Invalid', 1),
-             ('Upsert contact', 'Consent'), ('Consent', 'Enroll SQL'), ('Enroll SQL', 'Insert enrollment'), ('Insert enrollment', 'Result')]
+             ('Upsert contact', 'Consent'), ('Consent', 'Enroll SQL'), ('Enroll SQL', 'Insert enrollment'), ('Insert enrollment', 'Result'),
+             ('Result', 'Attempt SQL'), ('Invalid', 'Attempt SQL'), ('Attempt SQL', 'Log attempt'), ('Log attempt', 'Return')]
     return workflow('Seq: enroll contact', nodes, edges)
 
 
@@ -749,7 +774,7 @@ const flow = b.flow ? ` AND flow_key = ${q(String(b.flow))}` : '';
 const reason = q(String(b.reason || 'api_exit').slice(0, 100));
 return [{ json: { exit_sql: `WITH e AS (UPDATE seq_enrollments SET status = 'exited', ended_at = now(), exit_reason = ${reason}, claimed_at = NULL
     WHERE phone = ${q(phone)} AND status = 'active'${flow} RETURNING id, current_step),
-  l AS (INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason) SELECT id, current_step, 'exited', ${reason} FROM e RETURNING enrollment_id)
+  l AS (INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, ${RUN_COLS}) SELECT id, current_step, 'exited', ${reason}, ${RUN_VALS} FROM e RETURNING enrollment_id)
   SELECT 'ok' AS outcome, count(*)::int AS exited FROM l` } }];
 """
 
@@ -799,7 +824,7 @@ for (const label of added) {
   if (label === 'stop-sequence' && sender.id) {
     out.push({ json: { action: 'exit', contact_id: sender.id, exit_sql: `WITH e AS (UPDATE seq_enrollments SET status = 'exited', ended_at = now(), exit_reason = 'stop_label', claimed_at = NULL
       WHERE contact_id = ${sender.id} AND status = 'active' RETURNING id, current_step)
-      INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason) SELECT id, current_step, 'exited', 'stop_label' FROM e` } });
+      INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, ${RUN_COLS}) SELECT id, current_step, 'exited', 'stop_label', ${RUN_VALS} FROM e` } });
   } else if (label.startsWith('enroll-')) {
     out.push({ json: { action: 'enroll', flow: label.slice(7), phone_number: sender.phone_number, email: sender.email, name: sender.name, source: 'label' } });
   }
@@ -830,16 +855,30 @@ def label_watcher():
 def error_workflow():
     text = ("={{ 'Workflow: ' + $json.workflow.name + '\\nExecution: ' + ($json.execution.url || $json.execution.id) + '\\nNode: ' + "
             "(($json.execution.lastNodeExecuted) || '?') + '\\n\\n' + JSON.stringify($json.execution.error, null, 2).slice(0, 4000) }}")
+    error_sql_js = JS_HELPERS + r"""
+// An execution error carries `execution`; a trigger that failed to start carries `trigger` instead.
+return $input.all().map(i => {
+  const e = i.json;
+  const error = (e.execution && e.execution.error) || (e.trigger && e.trigger.error) || {};
+  return { json: { error_sql: `INSERT INTO seq_errors (workflow_id, workflow_name, execution_id, node, message)
+    VALUES (${q(e.workflow && e.workflow.id)}, ${q(e.workflow && e.workflow.name)}, ${q(e.execution && e.execution.id)},
+            ${q(e.execution && e.execution.lastNodeExecuted)}, ${q(String(error.message || JSON.stringify(error)).slice(0, 2000))})` } };
+});
+"""
     nodes = [
         node('Error', 'n8n-nodes-base.errorTrigger', 1, {}, (0, 0)),
+        # above the email on the canvas so it runs first (v1 order is top to bottom): a failing SMTP server must not lose the record
+        code('Error SQL', error_sql_js, (X, 0)),
+        pg('Record error', CRED_SEQ, '={{ $json.error_sql }}', (2 * X, 0), always=True, on_error_continue=True),
         node('Email alert', 'n8n-nodes-base.emailSend', 2.1,
              {'fromEmail': ALERT_FROM, 'toEmail': ALERT_EMAIL, 'subject': '={{ "n8n error: " + $json.workflow.name }}',
               'emailFormat': 'text', 'text': text, 'options': {'appendAttribution': False}},
-             (X, 0), credentials={'smtp': dict(CRED_SMTP)}),
+             (X, 160), credentials={'smtp': dict(CRED_SMTP)}),
         sticky('## Seq: error handler\nSet as the Error Workflow of every engine workflow (Settings → Error workflow). '
-               'Housekeeping releases the claims of a failed run.', (0, -180), 700, 100),
+               'Emails the alert and records the failed run in `seq_errors` (shown on Chatwoot\'s Reports → Sequences page). '
+               'Housekeeping releases the claims of a failed run.', (0, -180), 700, 120),
     ]
-    return workflow('Seq: error handler', nodes, [('Error', 'Email alert')])
+    return workflow('Seq: error handler', nodes, [('Error', 'Error SQL'), ('Error', 'Email alert'), ('Error SQL', 'Record error')])
 
 
 
@@ -875,7 +914,7 @@ return $input.all().map(i => {
   const reason = 'delivery_failed: ' + String(m.external_error).slice(0, 300);
   return { json: { ...m, mark_sql: `WITH l AS (UPDATE seq_message_logs SET status = 'failed', error = ${q(reason)}
       WHERE chatwoot_message_id = ${Number(m.message_id)} AND status = 'sent' RETURNING enrollment_id, step),
-    s AS (INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason) SELECT enrollment_id, step, 'failed', ${q(reason)} FROM l)
+    s AS (INSERT INTO seq_step_logs (enrollment_id, step, outcome, reason, ${RUN_COLS}) SELECT enrollment_id, step, 'failed', ${q(reason)}, ${RUN_VALS} FROM l)
     SELECT ${Number(m.conversation_id)} AS conversation_id, ${q(m.external_error)} AS external_error, l.step, e.phone, e.status, e.current_step,
            e.next_run_at, coalesce(f.name, e.flow_key) AS flow_name
     FROM l JOIN seq_enrollments e ON e.id = l.enrollment_id LEFT JOIN seq_flows f ON f.key = e.flow_key` } };

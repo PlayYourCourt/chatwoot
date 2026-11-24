@@ -13,7 +13,7 @@ every 5 min: Flow workflow claims due rows ──▶ Gate (Chatwoot DB, read-onl
 
 | Where | What |
 |---|---|
-| `sql/seq_schema.sql` | The six `seq_*` tables and the `seq_engine` grants |
+| `sql/seq_schema.sql` | The `seq_*` tables (state, logs, enroll attempts, engine errors) and the `seq_engine` grants |
 | `sql/chatwoot_readonly.sql` | SELECT grants on the Chatwoot tables the Gate reads |
 | `setup_db.sh` | Creates the `n8n` and `seq` databases and the three roles on a cluster, loads both SQL files. Idempotent |
 | `build_workflows.py` | Generates `workflows/*.json`: the engine workflows every time, a `Flow: <key>` only when its file is missing |
@@ -114,6 +114,30 @@ A flow triggered by the `Sale` metric posts to `/webhook/events` with
 `{ "kind": "purchase", "phone_number": "{{ person.phone_number }}", "payload": { … } }`. Email steps stay in
 Klaviyo.
 
+## Reporting (Chatwoot → Reports → Sequences)
+
+Chatwoot reads the `seq` database directly (read-only) and shows, per flow and date range: how many tried to enter
+and why some were refused, how many reached each step, what was sent, who is waiting or held, and why people left.
+A search by email, phone or name opens one person's timeline: every Gate decision and every text, with links to the
+contact, the conversation and the n8n run.
+
+- **What the engine records for it.** `seq_enroll_attempts` gets a row for every enroll call (API or
+  `enroll-<flow>` label) with its outcome, so a refusal (`skipped_*`, `unknown_flow`, `invalid_phone`) is visible even
+  though it leaves no enrollment. `seq_step_logs` and `seq_message_logs` carry `workflow_id` / `execution_id` of the
+  n8n run that wrote them, and `Seq: error handler` writes failed runs to `seq_errors`. Rows from before these
+  columns existed have no link.
+- **Links into n8n** open `<SEQUENCES_N8N_URL>/workflow/<workflow_id>/executions/<execution_id>`: the run of the
+  Gate, Send or enroll sub-workflow with the data at every node (its parent flow run is one click up). They need an
+  n8n login, and n8n prunes runs after `EXECUTIONS_DATA_MAX_AGE` (30 days), after which the page shows no link.
+- **Setup.** Re-run `setup_db.sh` with `SEQ_READONLY_PASSWORD='…'` added: it applies the schema additions and
+  creates the `seq_readonly` role (SELECT on the `seq_*` tables, nothing on the API keys). Then set
+  `SEQUENCES_DATABASE_URL` (that role, database `seq`) and `SEQUENCES_N8N_URL` in Chatwoot's env file and recreate
+  rails. Without `SEQUENCES_DATABASE_URL` the page is hidden. Do this **before** `push.py`: the updated workflows
+  write to the new columns and tables.
+- **Deploying engine changes while flows are running** is safe: a person's place is a row in `seq_enrollments`,
+  not a running execution. Apply the schema first, then push just after a tick. A run caught mid-push fails once;
+  housekeeping releases its claimed rows after 15 minutes and the message log's idempotency key stops a second text.
+
 ## Production notes
 
 - Regular (single process) mode. Waiting is rows in `seq_enrollments`, not n8n executions, so restarts and
@@ -133,5 +157,6 @@ Klaviyo.
 - **Regenerating an existing flow from the script** (the file is editor-owned): delete the file, rebuild,
   `push.py 'Flow: <key>'`.
 - **Schema**: add to `sql/seq_schema.sql` with `IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` and re-run
-  `setup_db.sh`.
+  `setup_db.sh`. Chatwoot's Reports → Sequences page reads these tables through the models in
+  `app/models/sequences/`: a renamed or dropped column needs a change there too.
 - **n8n version**: bump the image tag in both compose files, `up -d`. n8n migrates its own database.

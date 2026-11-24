@@ -24,7 +24,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n\nconst out = [];\nfor (const item of $input.all()) {\n  const b = item.json;\n  const phone = e164(b.phone_number || b.phone);\n  const flow = String(b.flow || b.flow_key || '').trim();\n  const name = [b.first_name, b.last_name].filter(Boolean).join(' ') || b.name || undefined;\n  let outcome = null;\n  if (!phone) outcome = 'invalid_phone';\n  else if (!/^[a-z0-9_-]+$/.test(flow)) outcome = 'invalid_flow';\n  // params become message placeholders for this enrollment; checkout_url may also be sent at the top level.\n  const params = { ...(b.params || {}), ...(b.checkout_url ? { checkout_url: String(b.checkout_url) } : {}) };\n  out.push({ json: { flow, phone, email: b.email || undefined, name, source: b.source || 'api', params, outcome } });\n}\nreturn out;\n"
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n// The n8n run that writes a log row: Chatwoot's Reports \u2192 Sequences page links to it (workflow/<id>/executions/<id>).\nconst RUN_COLS = 'workflow_id, execution_id';\nconst RUN_VALS = `${q($workflow.id)}, ${q($execution.id)}`;\n\nconst out = [];\nfor (const item of $input.all()) {\n  const b = item.json;\n  const phone = e164(b.phone_number || b.phone);\n  const flow = String(b.flow || b.flow_key || '').trim();\n  const name = [b.first_name, b.last_name].filter(Boolean).join(' ') || b.name || undefined;\n  let outcome = null;\n  if (!phone) outcome = 'invalid_phone';\n  else if (!/^[a-z0-9_-]+$/.test(flow)) outcome = 'invalid_flow';\n  // params become message placeholders for this enrollment; checkout_url may also be sent at the top level.\n  const params = { ...(b.params || {}), ...(b.checkout_url ? { checkout_url: String(b.checkout_url) } : {}) };\n  out.push({ json: { flow, phone, email: b.email || undefined, name, source: b.source || 'api', params, outcome } });\n}\nreturn out;\n"
       }
     },
     {
@@ -134,7 +134,7 @@
         -100
       ],
       "parameters": {
-        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n\nconst req = $('Normalize').all();\nconst out = [];\n$input.all().forEach((item, i) => {\n  const r = req[i].json;\n  const contact_id = item.json.contact_id;\n  const optedOut = item.json.opted_out_at;\n  const excluded = item.json.exclude_from_drip === 'true';\n  let sql;\n  if (!contact_id) sql = `SELECT 'contact_failed' AS outcome, NULL::bigint AS id`;\n  else if (optedOut) sql = `SELECT 'skipped_no_consent' AS outcome, NULL::bigint AS id`;\n  else if (excluded) sql = `SELECT 'skipped_excluded' AS outcome, NULL::bigint AS id`;\n  else sql = `WITH f AS (SELECT * FROM seq_flows WHERE key = ${q(r.flow)} AND status = 'active'),\n    last AS (SELECT * FROM seq_enrollments WHERE flow_key = ${q(r.flow)} AND contact_id = ${contact_id} ORDER BY enrolled_at DESC LIMIT 1),\n    other AS (SELECT flow_key FROM seq_enrollments WHERE contact_id = ${contact_id} AND status = 'active' AND flow_key <> ${q(r.flow)} LIMIT 1),\n    blocked AS (SELECT e.flow_key FROM seq_enrollments e\n                WHERE e.contact_id = ${contact_id} AND e.flow_key IN (\n                  SELECT jsonb_array_elements_text(rule->'flows') FROM f, jsonb_array_elements(f.end_rules) rule WHERE rule->>'rule' = 'no_enrollment_in')\n                LIMIT 1),\n    verdict AS (SELECT CASE\n        WHEN f.key IS NULL THEN 'unknown_flow'\n        WHEN last.status = 'active' THEN 'skipped_active'\n        WHEN other.flow_key IS NOT NULL THEN 'skipped_in_other_flow'\n        WHEN blocked.flow_key IS NOT NULL THEN 'skipped_prior_flow'\n        WHEN last.id IS NULL THEN 'enrolled'\n        WHEN f.reentry_policy = 'never' THEN 'skipped_reentry'\n        WHEN last.ended_at > now() - (f.reentry_cooldown_days || ' days')::interval THEN 'skipped_reentry'\n        WHEN f.reentry_policy = 'after_completion' AND last.status <> 'completed' THEN 'skipped_reentry'\n        WHEN f.reentry_policy = 'after_exit' AND last.status NOT IN ('completed', 'exited') THEN 'skipped_reentry'\n        ELSE 'enrolled' END AS outcome\n      FROM (SELECT 1) x LEFT JOIN f ON true LEFT JOIN last ON true LEFT JOIN other ON true LEFT JOIN blocked ON true),\n    ins AS (INSERT INTO seq_enrollments (flow_key, contact_id, phone, source, params)\n            SELECT ${q(r.flow)}, ${contact_id}, ${q(r.phone)}, ${q(r.source)}, ${qj(r.params)} FROM verdict WHERE outcome = 'enrolled' RETURNING id)\n    SELECT verdict.outcome, ins.id FROM verdict LEFT JOIN ins ON true`;\n  out.push({ json: { ...r, contact_id, enroll_sql: sql } });\n});\nreturn out;\n"
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n// The n8n run that writes a log row: Chatwoot's Reports \u2192 Sequences page links to it (workflow/<id>/executions/<id>).\nconst RUN_COLS = 'workflow_id, execution_id';\nconst RUN_VALS = `${q($workflow.id)}, ${q($execution.id)}`;\n\nconst req = $('Normalize').all();\nconst out = [];\n$input.all().forEach((item, i) => {\n  const r = req[i].json;\n  const contact_id = item.json.contact_id;\n  const optedOut = item.json.opted_out_at;\n  const excluded = item.json.exclude_from_drip === 'true';\n  let sql;\n  if (!contact_id) sql = `SELECT 'contact_failed' AS outcome, NULL::bigint AS id`;\n  else if (optedOut) sql = `SELECT 'skipped_no_consent' AS outcome, NULL::bigint AS id`;\n  else if (excluded) sql = `SELECT 'skipped_excluded' AS outcome, NULL::bigint AS id`;\n  else sql = `WITH f AS (SELECT * FROM seq_flows WHERE key = ${q(r.flow)} AND status = 'active'),\n    last AS (SELECT * FROM seq_enrollments WHERE flow_key = ${q(r.flow)} AND contact_id = ${contact_id} ORDER BY enrolled_at DESC LIMIT 1),\n    other AS (SELECT flow_key FROM seq_enrollments WHERE contact_id = ${contact_id} AND status = 'active' AND flow_key <> ${q(r.flow)} LIMIT 1),\n    blocked AS (SELECT e.flow_key FROM seq_enrollments e\n                WHERE e.contact_id = ${contact_id} AND e.flow_key IN (\n                  SELECT jsonb_array_elements_text(rule->'flows') FROM f, jsonb_array_elements(f.end_rules) rule WHERE rule->>'rule' = 'no_enrollment_in')\n                LIMIT 1),\n    verdict AS (SELECT CASE\n        WHEN f.key IS NULL THEN 'unknown_flow'\n        WHEN last.status = 'active' THEN 'skipped_active'\n        WHEN other.flow_key IS NOT NULL THEN 'skipped_in_other_flow'\n        WHEN blocked.flow_key IS NOT NULL THEN 'skipped_prior_flow'\n        WHEN last.id IS NULL THEN 'enrolled'\n        WHEN f.reentry_policy = 'never' THEN 'skipped_reentry'\n        WHEN last.ended_at > now() - (f.reentry_cooldown_days || ' days')::interval THEN 'skipped_reentry'\n        WHEN f.reentry_policy = 'after_completion' AND last.status <> 'completed' THEN 'skipped_reentry'\n        WHEN f.reentry_policy = 'after_exit' AND last.status NOT IN ('completed', 'exited') THEN 'skipped_reentry'\n        ELSE 'enrolled' END AS outcome\n      FROM (SELECT 1) x LEFT JOIN f ON true LEFT JOIN last ON true LEFT JOIN other ON true LEFT JOIN blocked ON true),\n    ins AS (INSERT INTO seq_enrollments (flow_key, contact_id, phone, source, params)\n            SELECT ${q(r.flow)}, ${contact_id}, ${q(r.phone)}, ${q(r.source)}, ${qj(r.params)} FROM verdict WHERE outcome = 'enrolled' RETURNING id)\n    SELECT verdict.outcome, ins.id FROM verdict LEFT JOIN ins ON true`;\n  out.push({ json: { ...r, contact_id, enroll_sql: sql } });\n});\nreturn out;\n"
       }
     },
     {
@@ -171,7 +171,7 @@
         -100
       ],
       "parameters": {
-        "jsCode": "\nconst req = $('Enroll SQL').all();\nreturn $input.all().map((item, i) => ({ json: { outcome: item.json.outcome || req[i].json.outcome, enrollment_id: item.json.id || null,\n  contact_id: req[i].json.contact_id || null, flow: req[i].json.flow, phone: req[i].json.phone } }));\n"
+        "jsCode": "\nconst req = $('Enroll SQL').all();\nreturn $input.all().map((item, i) => ({ json: { outcome: item.json.outcome || req[i].json.outcome, enrollment_id: item.json.id || null,\n  contact_id: req[i].json.contact_id || null, flow: req[i].json.flow, phone: req[i].json.phone,\n  email: req[i].json.email || null, source: req[i].json.source || null } }));\n"
       }
     },
     {
@@ -184,12 +184,63 @@
         120
       ],
       "parameters": {
-        "jsCode": "return $input.all().map(i => ({ json: { outcome: i.json.outcome, enrollment_id: null, contact_id: null, flow: i.json.flow, phone: i.json.phone } }));"
+        "jsCode": "return $input.all().map(i => ({ json: { outcome: i.json.outcome, enrollment_id: null, contact_id: null, flow: i.json.flow, phone: i.json.phone, email: i.json.email || null, source: i.json.source || null } }));"
       }
     },
     {
-      "id": "e06fade2-3afb-5fde-b8f4-d5b5ff1750a2",
-      "name": "Note f56fdb6c",
+      "id": "895629d8-b096-5a09-84d2-75d718615892",
+      "name": "Attempt SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst q = v => v === null || v === undefined ? 'NULL' : \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\nconst qj = v => q(JSON.stringify(v === undefined ? null : v)) + '::jsonb';\nconst e164 = v => {\n  const d = String(v || '').replace(/\\D/g, '');\n  if (d.length === 10) return '+1' + d;\n  if (d.length === 11 && d[0] === '1') return '+' + d;\n  return null;\n};\n// The n8n run that writes a log row: Chatwoot's Reports \u2192 Sequences page links to it (workflow/<id>/executions/<id>).\nconst RUN_COLS = 'workflow_id, execution_id';\nconst RUN_VALS = `${q($workflow.id)}, ${q($execution.id)}`;\n\nreturn $input.all().map(item => {\n  const r = item.json;\n  return { json: { ...r, attempt_sql: `INSERT INTO seq_enroll_attempts (flow_key, phone, email, contact_id, source, outcome, enrollment_id, ${RUN_COLS})\n    VALUES (${q(r.flow)}, ${q(r.phone)}, ${q(r.email)}, ${r.contact_id || 'NULL'}, ${q(r.source)}, ${q(r.outcome)}, ${r.enrollment_id || 'NULL'}, ${RUN_VALS})` } };\n});\n"
+      }
+    },
+    {
+      "id": "489603be-a48a-58d4-b820-b3b69ee379d8",
+      "name": "Log attempt",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.attempt_sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "name": "seq",
+          "type": "postgres"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "ccd4c2a3-7c5c-5f3e-b111-4fb411f715a2",
+      "name": "Return",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nreturn $('Attempt SQL').all().map(i => { const { attempt_sql, email, source, ...rest } = i.json; return { json: rest }; });\n"
+      }
+    },
+    {
+      "id": "b211dadc-ba41-5164-9de3-e00755c48db8",
+      "name": "Note 5519001e",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -197,7 +248,7 @@
         -240
       ],
       "parameters": {
-        "content": "## Seq: enroll contact\nInput: `{flow, phone_number, email?, first_name?, last_name?, source?, checkout_url?, params?}`. Upserts the Chatwoot contact (outreach endpoint without content), checks consent, applies the flow's re-entry policy and inserts the enrollment. Returns `outcome`: enrolled, skipped_active, skipped_reentry, skipped_no_consent, unknown_flow, invalid_phone, invalid_flow.",
+        "content": "## Seq: enroll contact\nInput: `{flow, phone_number, email?, first_name?, last_name?, source?, checkout_url?, params?}`. Upserts the Chatwoot contact (outreach endpoint without content), checks consent, applies the flow's re-entry policy and inserts the enrollment. Returns `outcome`: enrolled, skipped_active, skipped_reentry, skipped_no_consent, unknown_flow, invalid_phone, invalid_flow. Every call is recorded in `seq_enroll_attempts` with its outcome.",
         "width": 1000,
         "height": 150,
         "color": 1
@@ -283,6 +334,50 @@
         [
           {
             "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result": {
+      "main": [
+        [
+          {
+            "node": "Attempt SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invalid": {
+      "main": [
+        [
+          {
+            "node": "Attempt SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attempt SQL": {
+      "main": [
+        [
+          {
+            "node": "Log attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log attempt": {
+      "main": [
+        [
+          {
+            "node": "Return",
             "type": "main",
             "index": 0
           }
