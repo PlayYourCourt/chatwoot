@@ -691,6 +691,90 @@
       }
     }
   },
+  "SEQUENCE_REPORTS": {
+    "HEADER": "Sequences",
+    "DESCRIPTION": "How people move through the SMS sequences: who entered, which step they reached, and why they left. Counts follow the people who enrolled in the selected dates.",
+    "FLOW": "Sequence",
+    "FLOW_PAUSED": "{name} (paused)",
+    "SEARCH": "Search",
+    "SEARCH_PLACEHOLDER": "Search by email, phone or name",
+    "CLEAR_SEARCH": "Clear search",
+    "FETCH_FAILED": "Could not load the sequence data. Please try again.",
+    "OPEN_IN_N8N": "Open in n8n",
+    "STATUS": {
+      "ACTIVE": "Active",
+      "COMPLETED": "Completed",
+      "EXITED": "Exited",
+      "HELD": "Held"
+    },
+    "CARDS": {
+      "ATTEMPTS": "Tried to enter",
+      "ENROLLED": "Enrolled",
+      "NOT_ENROLLED": "Not enrolled:"
+    },
+    "FUNNEL": {
+      "TITLE": "Steps",
+      "DESCRIPTION": "Reached counts everyone the sequence brought to a step. Waiting, held and exited are the people on that step now; select a number to list them.",
+      "STEP": "Step",
+      "REACHED": "Reached",
+      "PERCENT": "({percent}%)",
+      "SENT": "Sent",
+      "FAILED": "Failed",
+      "DEFERRED": "Deferred",
+      "WAITING": "Waiting",
+      "HELD": "Held",
+      "EXITED": "Exited",
+      "EMPTY": "Nobody enrolled in this sequence in the selected dates."
+    },
+    "EXITS": {
+      "TITLE": "Why people left",
+      "REASON": "Reason",
+      "STEP": "Step",
+      "PEOPLE": "People",
+      "EMPTY": "Nobody has left this sequence in the selected dates."
+    },
+    "ERRORS": {
+      "TITLE": "Engine errors",
+      "TIME": "Time",
+      "WORKFLOW": "Workflow",
+      "NODE": "Node",
+      "MESSAGE": "Error"
+    },
+    "PEOPLE": {
+      "TITLE": "People",
+      "SEARCH_TITLE": "Results for \"{query}\" across all sequences and dates",
+      "ENROLLMENTS": "Enrolled",
+      "ATTEMPTS": "Entry attempts",
+      "CONTACT": "Contact",
+      "FLOW": "Sequence",
+      "STATUS": "Status",
+      "STEP": "Step",
+      "ENROLLED_AT": "Enrolled",
+      "REASON": "Exit reason",
+      "OUTCOME": "Outcome",
+      "SOURCE": "Source",
+      "ATTEMPTED_AT": "Time",
+      "VIEW_TIMELINE": "Timeline",
+      "EMPTY_ENROLLMENTS": "No enrollments match.",
+      "EMPTY_ATTEMPTS": "No entry attempts match.",
+      "FILTERS": {
+        "STATUS": "Status: {value}",
+        "EXIT_REASON": "Reason: {value}",
+        "CURRENT_STEP": "Step: {value}",
+        "OUTCOME": "Outcome: {value}"
+      }
+    },
+    "TIMELINE": {
+      "TITLE": "Sequence timeline",
+      "STEP": "Step {step}",
+      "PHONE": "Enrolled number",
+      "ENDED_AT": "Ended",
+      "NEXT_RUN_AT": "Next step due",
+      "OPEN_CONTACT": "Open contact",
+      "OPEN_CONVERSATION": "Open conversation",
+      "EMPTY": "The sequence has not run a step for this person yet."
+    }
+  },
   "BOT_REPORTS": {
     "HEADER": "Bot Reports",
     "METRIC": {

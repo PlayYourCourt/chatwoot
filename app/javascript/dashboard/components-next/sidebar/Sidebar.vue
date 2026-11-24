@@ -60,6 +60,7 @@ const isACustomBrandedInstance = useMapGetter(
   'globalConfig/isACustomBrandedInstance'
 );
 const isRTL = useMapGetter('accounts/isRTL');
+const globalConfig = useMapGetter('globalConfig/get');
 
 const { width: windowWidth } = useWindowSize();
 const isMobile = computed(() => windowWidth.value < 768);
@@ -716,6 +717,15 @@ const menuItems = computed(() => {
           label: t('SIDEBAR.REPORTS_BOT'),
           to: accountScopedRoute('bot_reports'),
         },
+        ...(globalConfig.value.sequenceReportsEnabled
+          ? [
+              {
+                name: 'Reports Sequences',
+                label: t('SIDEBAR.REPORTS_SEQUENCES'),
+                to: accountScopedRoute('sequence_reports'),
+              },
+            ]
+          : []),
         ...(isMonitorsAvailable.value
           ? [
               {

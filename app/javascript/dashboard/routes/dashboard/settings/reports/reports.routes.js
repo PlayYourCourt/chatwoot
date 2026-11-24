@@ -25,6 +25,7 @@ import CsatResponses from './CsatResponses.vue';
 import LiveReports from './LiveReports.vue';
 import MonitorShow from './monitors/MonitorShow.vue';
 import MonitorsIndex from './monitors/MonitorsIndex.vue';
+import SequenceReports from './SequenceReports.vue';
 import SLAReports from './SLAReports.vue';
 
 const meta = {
@@ -172,6 +173,12 @@ export default {
           name: 'bot_reports',
           meta,
           component: BotReports,
+        },
+        {
+          path: 'sequences',
+          name: 'sequence_reports',
+          meta,
+          component: SequenceReports,
         },
       ],
     },

@@ -608,6 +608,16 @@ Rails.application.routes.draw do
             end
           end
           resource :year_in_review, only: [:show]
+          resources :sequence_reports, only: [:index] do
+            collection do
+              get :summary
+              get :enrollments
+              get :attempts
+            end
+            member do
+              get :enrollment
+            end
+          end
           resources :live_reports, only: [] do
             collection do
               get :conversation_metrics
