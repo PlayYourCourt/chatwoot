@@ -4,6 +4,7 @@
 # deleted once it is empty.
 class DataImports::Salesforce::InboxRelocator
   Result = Struct.new(:conversations, :messages, :contact_inboxes, :deleted_placeholder, keyword_init: true)
+  BATCH_SIZE = 5_000
 
   def initialize(from:, to:)
     raise ArgumentError, 'Both inboxes must belong to the same account.' unless from.account_id == to.account_id
@@ -18,8 +19,9 @@ class DataImports::Salesforce::InboxRelocator
       relocate_contact_inbox(contact_inbox)
       moved_contact_inboxes += 1
     end
-    conversations = Conversation.where(inbox_id: @from.id).update_all(inbox_id: @to.id)
-    messages = Message.where(inbox_id: @from.id).update_all(inbox_id: @to.id)
+    # Batched so each UPDATE stays under the database statement timeout.
+    conversations = Conversation.where(inbox_id: @from.id).in_batches(of: BATCH_SIZE).update_all(inbox_id: @to.id)
+    messages = Message.where(inbox_id: @from.id).in_batches(of: BATCH_SIZE).update_all(inbox_id: @to.id)
     deleted = delete_placeholder
     Result.new(conversations: conversations, messages: messages, contact_inboxes: moved_contact_inboxes, deleted_placeholder: deleted)
   end
