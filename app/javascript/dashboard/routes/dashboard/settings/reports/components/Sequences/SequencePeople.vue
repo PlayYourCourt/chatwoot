@@ -81,6 +81,7 @@ const enrollmentHeaders = computed(() => [
   t('SEQUENCE_REPORTS.PEOPLE.STATUS'),
   t('SEQUENCE_REPORTS.PEOPLE.STEP'),
   t('SEQUENCE_REPORTS.PEOPLE.ENROLLED_AT'),
+  t('SEQUENCE_REPORTS.PEOPLE.NEXT_RUN_AT'),
   t('SEQUENCE_REPORTS.PEOPLE.REASON'),
 ]);
 
@@ -92,6 +93,10 @@ const attemptHeaders = computed(() => [
   t('SEQUENCE_REPORTS.PEOPLE.ATTEMPTED_AT'),
   '',
 ]);
+
+// Only an active enrollment has a step ahead of it.
+const nextRunAt = record =>
+  record.status === 'active' ? formatTimestamp(record.next_run_at) : '';
 
 const contactName = record =>
   record.contact?.name || record.email || record.phone || '';
@@ -245,6 +250,9 @@ const clearFilter = key => {
             <span class="whitespace-nowrap">
               {{ formatTimestamp(item.enrolled_at) }}
             </span>
+          </BaseTableCell>
+          <BaseTableCell>
+            <span class="whitespace-nowrap">{{ nextRunAt(item) }}</span>
           </BaseTableCell>
           <BaseTableCell>{{ humanize(item.exit_reason) }}</BaseTableCell>
         </BaseTableRow>

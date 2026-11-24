@@ -750,6 +750,7 @@
       "STATUS": "Status",
       "STEP": "Step",
       "ENROLLED_AT": "Enrolled",
+      "NEXT_RUN_AT": "Next step due",
       "REASON": "Exit reason",
       "OUTCOME": "Outcome",
       "SOURCE": "Source",
